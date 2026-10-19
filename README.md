@@ -76,14 +76,12 @@ In the Vercel Project Settings, add your `DATABASE_URL`:
   SESSION_SECRET="generate_a_secure_random_string_here"
   ```
 
-### Step 4: Deploy & Initialize
+### Step 4: Deploy (Zero-Terminal Setup)
 1. Click **Deploy**.
-2. To push the schema and seed default BUK records into your cloud database, run:
-   ```bash
-   npx prisma db push
-   node prisma/seed.js
-   ```
-   *(Or configure Prisma schema provider to `"postgresql"` or `"mysql"` depending on your cloud DB)*.
+2. Vercel automatically runs [`scripts/deploy-db.js`](scripts/deploy-db.js) during the build, which:
+   - Pushes the database schema to your PostgreSQL database (`prisma db push`).
+   - Seeds the default BUK Administrator (`admin@buk.edu.ng`), Faculties, Programmes, Course Units, Venues, Lecturer, and Students.
+   - Compiles and launches your live application without requiring any manual terminal commands!
 
 ---
 
