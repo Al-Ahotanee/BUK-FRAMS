@@ -81,20 +81,27 @@ export default function HomePage() {
               foolproof proxy prevention, and comprehensive compliance analytics.
             </p>
 
-            <div className="pt-4 flex flex-col sm:flex-row gap-4 justify-center lg:justify-start">
+            <div className="pt-4 flex flex-col sm:flex-row gap-3 justify-center lg:justify-start">
+              <Link
+                href="/login?role=student"
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 text-sm"
+              >
+                <GraduationCap className="w-5 h-5 text-emerald-200" />
+                <span>Student Portal</span>
+              </Link>
               <Link
                 href="/login?role=lecturer"
-                className="bg-buk-gold hover:bg-buk-gold-dark text-buk-navy font-bold px-8 py-3.5 rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-3 text-base"
+                className="bg-buk-gold hover:bg-buk-gold-dark text-buk-navy font-bold px-6 py-3.5 rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 text-sm"
               >
                 <Camera className="w-5 h-5" />
-                <span>Launch Attendance Scanner</span>
+                <span>Lecturer Scanner</span>
               </Link>
               <Link
                 href="/login?role=admin"
-                className="bg-white/10 hover:bg-white/15 text-white border border-white/20 font-semibold px-8 py-3.5 rounded-xl transition-all flex items-center justify-center gap-3 text-base"
+                className="bg-white/10 hover:bg-white/15 text-white border border-white/20 font-semibold px-6 py-3.5 rounded-xl transition-all flex items-center justify-center gap-2.5 text-sm"
               >
                 <ShieldCheck className="w-5 h-5 text-buk-gold" />
-                <span>Administrator Dashboard</span>
+                <span>Admin Suite</span>
               </Link>
             </div>
 
@@ -126,28 +133,41 @@ export default function HomePage() {
                 <span className="text-xs font-mono bg-slate-100 text-slate-700 px-2 py-0.5 rounded">v2.0</span>
               </div>
 
-              <div className="mt-6 space-y-4">
-                <div className="p-4 rounded-xl bg-buk-navy/5 border border-buk-navy/10 flex items-start gap-4">
-                  <div className="p-2.5 rounded-lg bg-buk-navy text-buk-gold shrink-0">
-                    <Camera className="w-6 h-6" />
+              <div className="mt-4 space-y-3">
+                <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200/80 flex items-start gap-3.5">
+                  <div className="p-2 rounded-lg bg-emerald-600 text-white shrink-0">
+                    <GraduationCap className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-900 text-sm">Lecturer Terminal</h4>
-                    <p className="text-xs text-slate-600 mt-0.5">Authenticate classroom attendance with high-speed neural face matching.</p>
-                    <Link href="/login?role=lecturer" className="inline-flex items-center gap-1 text-xs font-bold text-buk-navy hover:text-buk-gold-dark mt-2">
+                    <h4 className="font-bold text-slate-900 text-xs">Student Portal</h4>
+                    <p className="text-[11px] text-slate-600 mt-0.5">Track attendance, submit absence excuse waivers, and print exam passes.</p>
+                    <Link href="/login?role=student" className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-800 hover:underline mt-1">
+                      Sign in as Student &rarr;
+                    </Link>
+                  </div>
+                </div>
+
+                <div className="p-3.5 rounded-xl bg-buk-navy/5 border border-buk-navy/10 flex items-start gap-3.5">
+                  <div className="p-2 rounded-lg bg-buk-navy text-buk-gold shrink-0">
+                    <Camera className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-xs">Lecturer Terminal</h4>
+                    <p className="text-[11px] text-slate-600 mt-0.5">Conduct live classroom attendance with instantaneous facial matching.</p>
+                    <Link href="/login?role=lecturer" className="inline-flex items-center gap-1 text-[11px] font-bold text-buk-navy hover:text-buk-gold-dark mt-1">
                       Sign in as Lecturer &rarr;
                     </Link>
                   </div>
                 </div>
 
-                <div className="p-4 rounded-xl bg-amber-50 border border-amber-200/80 flex items-start gap-4">
-                  <div className="p-2.5 rounded-lg bg-buk-gold text-buk-navy shrink-0">
-                    <ShieldCheck className="w-6 h-6" />
+                <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200/80 flex items-start gap-3.5">
+                  <div className="p-2 rounded-lg bg-buk-gold text-buk-navy shrink-0">
+                    <ShieldCheck className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-900 text-sm">Administrative Center</h4>
-                    <p className="text-xs text-slate-600 mt-0.5">Enroll students, manage faculty course assignments, and export compliance reports.</p>
-                    <Link href="/login?role=admin" className="inline-flex items-center gap-1 text-xs font-bold text-buk-navy hover:text-buk-gold-dark mt-2">
+                    <h4 className="font-bold text-slate-900 text-xs">Administrative Control Room</h4>
+                    <p className="text-[11px] text-slate-600 mt-0.5">Biometric enrollment, absence waiver review, and compliance audit trail.</p>
+                    <Link href="/login?role=admin" className="inline-flex items-center gap-1 text-[11px] font-bold text-buk-navy hover:text-buk-gold-dark mt-1">
                       Sign in as Administrator &rarr;
                     </Link>
                   </div>

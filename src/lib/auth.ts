@@ -4,7 +4,9 @@ export interface UserSession {
   id: number;
   email: string;
   name: string;
-  role: 'admin' | 'lecturer';
+  role: 'admin' | 'lecturer' | 'student';
+  regNo?: string;
+  faculty?: string;
 }
 
 const COOKIE_NAME = 'buk_auth_session';
@@ -29,6 +31,8 @@ export function parseSessionCookie(token: string): UserSession | null {
       email: data.email,
       name: data.name,
       role: data.role,
+      regNo: data.regNo,
+      faculty: data.faculty,
     };
   } catch {
     return null;

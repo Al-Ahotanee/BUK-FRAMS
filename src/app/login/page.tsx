@@ -4,22 +4,28 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { BukLogo } from '@/components/BukLogo';
-import { Shield, Camera, Lock, Mail, AlertCircle, ArrowLeft, Loader2 } from 'lucide-react';
+import { Shield, Camera, GraduationCap, Lock, Mail, AlertCircle, ArrowLeft, Loader2, CheckCircle2 } from 'lucide-react';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const initialRole = searchParams.get('role') === 'admin' ? 'admin' : 'lecturer';
+  const initialRoleParam = searchParams.get('role');
+  const initialRole: 'student' | 'lecturer' | 'admin' = 
+    initialRoleParam === 'admin' ? 'admin' : 
+    initialRoleParam === 'student' ? 'student' : 'lecturer';
 
-  const [role, setRole] = useState<'admin' | 'lecturer'>(initialRole);
+  const [role, setRole] = useState<'student' | 'lecturer' | 'admin'>(initialRole);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Automatically update suggested email when switching tabs if default is untouched
+  // Automatically update suggested credentials when switching tabs
   useEffect(() => {
-    if (role === 'admin') {
+    if (role === 'student') {
+      setEmail('CST/21/COM/00101');
+      setPassword('@student123');
+    } else if (role === 'admin') {
       setEmail('admin@buk.edu.ng');
       setPassword('@admin_');
     } else {
@@ -52,6 +58,8 @@ function LoginForm() {
       // Route according to authenticated user role
       if (data.role === 'admin') {
         router.push('/admin');
+      } else if (data.role === 'student') {
+        router.push('/student');
       } else {
         router.push('/lecturer');
       }
@@ -64,7 +72,7 @@ function LoginForm() {
   return (
     <div className="min-h-screen flex flex-col justify-center items-center bg-gradient-to-br from-slate-100 via-buk-slate-50 to-amber-50/40 p-4 sm:p-6">
       {/* Return to home link */}
-      <div className="w-full max-w-md mb-6">
+      <div className="w-full max-w-lg mb-6">
         <Link
           href="/"
           className="inline-flex items-center gap-2 text-xs font-semibold text-buk-navy hover:text-buk-gold-dark transition-colors"
@@ -74,43 +82,56 @@ function LoginForm() {
         </Link>
       </div>
 
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-200/80 overflow-hidden">
+      <div className="w-full max-w-lg bg-white rounded-3xl shadow-xl border border-slate-200/80 overflow-hidden">
         {/* Header Bar */}
         <div className="bg-buk-navy p-6 sm:p-8 text-center border-b-2 border-buk-gold">
           <div className="flex justify-center">
             <BukLogo lightText size="lg" />
           </div>
           <p className="mt-3 text-xs text-slate-300 font-medium">
-            Authorized Personnel Authentication
+            Bayero University Kano &bull; Identity & Attendance Gateway
           </p>
         </div>
 
-        {/* Role Tab Selector */}
-        <div className="grid grid-cols-2 p-2 bg-slate-100/90 border-b border-slate-200 text-xs font-bold">
+        {/* 3-Role Tab Selector */}
+        <div className="grid grid-cols-3 p-1.5 bg-slate-100 border-b border-slate-200 text-xs font-bold gap-1">
+          <button
+            type="button"
+            onClick={() => setRole('student')}
+            className={`py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+              role === 'student'
+                ? 'bg-white text-buk-navy shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <GraduationCap className="w-4 h-4 text-buk-gold" />
+            <span>Student</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setRole('lecturer')}
-            className={`py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all ${
+            className={`py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
               role === 'lecturer'
                 ? 'bg-white text-buk-navy shadow-sm'
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
             <Camera className="w-4 h-4 text-buk-gold" />
-            <span>Lecturer Sign In</span>
+            <span>Lecturer</span>
           </button>
 
           <button
             type="button"
             onClick={() => setRole('admin')}
-            className={`py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all ${
+            className={`py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
               role === 'admin'
                 ? 'bg-white text-buk-navy shadow-sm'
                 : 'text-slate-500 hover:text-slate-800'
             }`}
           >
             <Shield className="w-4 h-4 text-buk-navy" />
-            <span>Admin Sign In</span>
+            <span>Admin</span>
           </button>
         </div>
 
@@ -126,17 +147,23 @@ function LoginForm() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                Official Email Address
+                {role === 'student' ? 'Registration Number or Email' : 'Official Email Address'}
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                  <Mail className="w-4 h-4" />
+                  {role === 'student' ? <GraduationCap className="w-4 h-4" /> : <Mail className="w-4 h-4" />}
                 </div>
                 <input
-                  type="email"
+                  type="text"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder={role === 'admin' ? 'admin@buk.edu.ng' : 'lecturer@buk.edu.ng'}
+                  placeholder={
+                    role === 'student'
+                      ? 'CST/21/COM/00101 or student@buk.edu.ng'
+                      : role === 'admin'
+                      ? 'admin@buk.edu.ng'
+                      : 'lecturer@buk.edu.ng'
+                  }
                   required
                   className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-300 text-sm focus:outline-none focus:ring-2 focus:ring-buk-navy focus:border-transparent text-slate-800 placeholder-slate-400"
                 />
@@ -173,21 +200,72 @@ function LoginForm() {
                   <span>Verifying Credentials...</span>
                 </>
               ) : (
-                <span>Access {role === 'admin' ? 'Administrator' : 'Lecturer'} Terminal</span>
+                <span>
+                  Sign In to{' '}
+                  {role === 'student'
+                    ? 'Student Dashboard'
+                    : role === 'admin'
+                    ? 'Administrator Suite'
+                    : 'Lecturer Terminal'}
+                </span>
               )}
             </button>
           </form>
 
-          {/* Quick test account helper */}
-          <div className="mt-6 pt-5 border-t border-slate-100 bg-slate-50/70 -mx-6 -mb-6 p-4 sm:p-5 text-center text-xs text-slate-500 rounded-b-3xl">
-            <p className="font-semibold text-slate-700">Pre-Configured Demo Credentials:</p>
-            <p className="mt-1 font-mono text-[11px] text-slate-600">
-              {role === 'admin' ? (
-                <>admin@buk.edu.ng &bull; @admin_</>
-              ) : (
-                <>lecturer@buk.edu.ng &bull; @lecturer_</>
-              )}
+          {/* Institutional Fast-Fill Demo Badges */}
+          <div className="mt-6 pt-5 border-t border-slate-100">
+            <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-2.5">
+              Quick One-Click Test Accounts:
             </p>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setRole('student');
+                  setEmail('CST/21/COM/00101');
+                  setPassword('@student123');
+                }}
+                className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left transition-colors"
+              >
+                <div className="flex items-center gap-1 text-[11px] font-bold text-buk-navy">
+                  <CheckCircle2 className="w-3 h-3 text-buk-gold" />
+                  <span>Student</span>
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">CST/21/COM/00101</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRole('lecturer');
+                  setEmail('lecturer@buk.edu.ng');
+                  setPassword('@lecturer_');
+                }}
+                className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left transition-colors"
+              >
+                <div className="flex items-center gap-1 text-[11px] font-bold text-buk-navy">
+                  <CheckCircle2 className="w-3 h-3 text-buk-gold" />
+                  <span>Lecturer</span>
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">Dr. Mark Ibrahim</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setRole('admin');
+                  setEmail('admin@buk.edu.ng');
+                  setPassword('@admin_');
+                }}
+                className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-left transition-colors"
+              >
+                <div className="flex items-center gap-1 text-[11px] font-bold text-buk-navy">
+                  <CheckCircle2 className="w-3 h-3 text-buk-gold" />
+                  <span>Admin</span>
+                </div>
+                <div className="text-[10px] text-slate-500 truncate">Control Room</div>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -197,7 +275,13 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-xs text-slate-500">Loading BUK Portal...</div>}>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-slate-100">
+          <Loader2 className="w-8 h-8 text-buk-navy animate-spin" />
+        </div>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

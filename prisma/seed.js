@@ -200,7 +200,8 @@ async function main() {
   });
   console.log(`Lecturer ${lecturer.firstName} ${lecturer.lastName} assigned to units.`);
 
-  // 7. Create Demo Students
+  // 7. Create Demo Students with password @student123
+  const defaultStudentPassword = await bcrypt.hash('@student123', 10);
   const students = [
     {
       firstName: 'Amina',
@@ -225,19 +226,20 @@ async function main() {
   for (const s of students) {
     const student = await prisma.student.upsert({
       where: { registrationNumber: s.regNo },
-      update: {},
+      update: { password: defaultStudentPassword },
       create: {
         firstName: s.firstName,
         lastName: s.lastName,
         registrationNumber: s.regNo,
         email: s.email,
+        password: defaultStudentPassword,
         faculty: 'FCSIT',
         courseCode: 'B.Sc. CSC',
         courseId: cscCourse.id,
       },
     });
 
-    // Assign student to AI unit
+    // Assign student to AI unit & Database unit
     await prisma.studentUnit.upsert({
       where: {
         studentId_unitId: {
@@ -251,9 +253,72 @@ async function main() {
         unitId: aiUnit.id,
       },
     });
+
+    await prisma.studentUnit.upsert({
+      where: {
+        studentId_unitId: {
+          studentId: student.id,
+          unitId: dbUnit.id,
+        },
+      },
+      update: {},
+      create: {
+        studentId: student.id,
+        unitId: dbUnit.id,
+      },
+    });
+  }
+  console.log('Sample BUK Students enrolled and assigned.');
+
+  // 8. Seed Demo Attendance Records
+  const amina = await prisma.student.findUnique({ where: { registrationNumber: 'CST/21/COM/00101' } });
+  const usman = await prisma.student.findUnique({ where: { registrationNumber: 'CST/21/COM/00102' } });
+
+  if (amina) {
+    // 4 present records for Amina (High attendance)
+    for (let i = 1; i <= 4; i++) {
+      await prisma.attendance.create({
+        data: {
+          studentRegistrationNumber: amina.registrationNumber,
+          studentId: amina.id,
+          courseCode: 'B.Sc. CSC',
+          unitCode: 'CSC 4201',
+          unitId: aiUnit.id,
+          venue: 'FCSIT Lecture Theatre 1',
+          attendanceStatus: 'Present',
+          timeMarked: `09:1${i} AM`,
+          dateMarked: new Date(Date.now() - i * 86400000 * 2),
+        },
+      });
+    }
   }
 
-  console.log('Sample BUK Students enrolled and assigned.');
+  if (usman) {
+    // Usman has missed classes and a pending medical excuse
+    await prisma.absenceExcuse.create({
+      data: {
+        studentId: usman.id,
+        unitId: aiUnit.id,
+        reason: 'Medical Illness',
+        description: 'Admitted at Aminu Kano Teaching Hospital (AKTH) with acute typhoid fever. Attached discharge summary.',
+        documentUrl: 'https://images.unsplash.com/photo-1584515979956-d9f6e5d09982?auto=format&fit=crop&w=600&q=80',
+        dateMissed: new Date(Date.now() - 86400000 * 3),
+        status: 'PENDING',
+      },
+    });
+  }
+
+  // 9. Initial Enterprise Audit Log
+  await prisma.auditLog.create({
+    data: {
+      actorRole: 'ADMIN',
+      actorEmail: 'admin@buk.edu.ng',
+      action: 'SYSTEM_INITIALIZED',
+      details: 'BUK-FRAS Enterprise biometric registry initialized with cloud schema and sample cohort.',
+      ipAddress: '127.0.0.1',
+    },
+  });
+
   console.log('Database seeding complete!');
 }
 

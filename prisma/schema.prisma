@@ -46,6 +46,7 @@ model Unit {
   lecturerAssignments LecturerUnit[]
   studentAssignments  StudentUnit[]
   attendances         Attendance[]
+  excuses             AbsenceExcuse[]
   createdAt           DateTime       @default(now())
 }
 
@@ -76,20 +77,22 @@ model Lecturer {
 }
 
 model Student {
-  id                 Int           @id @default(autoincrement())
+  id                 Int             @id @default(autoincrement())
   firstName          String
   lastName           String
-  registrationNumber String        @unique
-  email              String        @unique
+  registrationNumber String          @unique
+  email              String          @unique
+  password           String          @default("$2a$10$wE8q67x1y8u0eC/N6aL6bO2kQcM.E9J4w5eQ7rY1tU2iO3pA4sD5G") // Default hashed '@student123'
   faculty            String
   courseCode         String
   courseId           Int?
-  course             Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
-  studentImage       String?       // Primary photo (DataURL or URL)
-  faceDescriptors    String?       // JSON-encoded array of 128-d float embedding vectors
+  course             Course?         @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  studentImage       String?         // Primary photo (DataURL or URL)
+  faceDescriptors    String?         // JSON-encoded array of 128-d float embedding vectors
   unitAssignments    StudentUnit[]
   attendances        Attendance[]
-  createdAt          DateTime      @default(now())
+  excuses            AbsenceExcuse[]
+  createdAt          DateTime        @default(now())
 }
 
 model LecturerUnit {
@@ -131,6 +134,37 @@ model Attendance {
   @@index([studentRegistrationNumber, unitCode, dateMarked])
 }
 
+model AbsenceExcuse {
+  id          Int      @id @default(autoincrement())
+  studentId   Int
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  unitId      Int
+  unit        Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reason      String   // "Medical", "Compassionate", "University Official", "Exam Clash", "Other"
+  description String
+  documentUrl String?  // Supporting document or doctor's report in S3/cloud storage
+  dateMissed  DateTime
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  adminNotes  String?
+  reviewedBy  String?  // Admin or Lecturer email
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([studentId, unitId, status])
+}
+
+model AuditLog {
+  id         Int      @id @default(autoincrement())
+  actorRole  String   // ADMIN, LECTURER, STUDENT
+  actorEmail String
+  action     String   // e.g. "USER_LOGIN", "EXCUSE_SUBMITTED", "EXCUSE_APPROVED", "ATTENDANCE_RECORDED"
+  details    String?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  @@index([actorRole, action, createdAt])
+}
+
 model NotificationLog {
   id        Int      @id @default(autoincrement())
   recipient String
@@ -139,3 +173,4 @@ model NotificationLog {
   status    String   @default("sent")
   createdAt DateTime @default(now())
 }
+

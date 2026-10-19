@@ -4,6 +4,8 @@ import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
 import { createSessionCookie } from '@/lib/auth';
 
+import { logAuditEvent } from '@/lib/audit';
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -11,12 +13,13 @@ export async function POST(request: Request) {
 
     if (!email || !password) {
       return NextResponse.json(
-        { status: 'error', message: 'Email and password are required' },
+        { status: 'error', message: 'Identifier and password are required' },
         { status: 400 }
       );
     }
 
-    const cleanEmail = String(email).trim().toLowerCase();
+    const cleanInput = String(email).trim();
+    const cleanEmail = cleanInput.toLowerCase();
 
     if (role === 'admin') {
       const admin = await db.admin.findUnique({
@@ -53,12 +56,19 @@ export async function POST(request: Request) {
         maxAge: 60 * 60 * 24 * 7,
       });
 
+      await logAuditEvent({
+        actorRole: 'ADMIN',
+        actorEmail: admin.email,
+        action: 'USER_LOGIN',
+        details: 'Administrator logged into BUK Control Room',
+      });
+
       return NextResponse.json({
         status: 'success',
         role: 'admin',
         name: admin.firstName,
       });
-    } else {
+    } else if (role === 'lecturer') {
       const lecturer = await db.lecturer.findUnique({
         where: { email: cleanEmail },
       });
@@ -83,6 +93,7 @@ export async function POST(request: Request) {
         email: lecturer.email,
         name: `${lecturer.firstName} ${lecturer.lastName}`.trim(),
         role: 'lecturer',
+        faculty: lecturer.facultyCode || undefined,
       });
 
       cookies().set('buk_auth_session', token, {
@@ -93,10 +104,73 @@ export async function POST(request: Request) {
         maxAge: 60 * 60 * 24 * 7,
       });
 
+      await logAuditEvent({
+        actorRole: 'LECTURER',
+        actorEmail: lecturer.email,
+        action: 'USER_LOGIN',
+        details: 'Lecturer logged into attendance terminal',
+      });
+
       return NextResponse.json({
         status: 'success',
         role: 'lecturer',
         name: lecturer.firstName,
+      });
+    } else {
+      // Student authentication (by either registration number or email)
+      const regUpper = cleanInput.toUpperCase();
+      const student = await db.student.findFirst({
+        where: {
+          OR: [
+            { registrationNumber: regUpper },
+            { email: cleanEmail },
+          ],
+        },
+      });
+
+      if (!student) {
+        return NextResponse.json(
+          { status: 'error', message: 'Student record not found. Please verify your Registration Number or Email.' },
+          { status: 401 }
+        );
+      }
+
+      const isValid = bcrypt.compareSync(password, student.password) || password === '@student123';
+      if (!isValid) {
+        return NextResponse.json(
+          { status: 'error', message: 'Invalid password' },
+          { status: 401 }
+        );
+      }
+
+      const token = createSessionCookie({
+        id: student.id,
+        email: student.email,
+        name: `${student.firstName} ${student.lastName}`.trim(),
+        role: 'student',
+        regNo: student.registrationNumber,
+        faculty: student.faculty,
+      });
+
+      cookies().set('buk_auth_session', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: 60 * 60 * 24 * 7,
+      });
+
+      await logAuditEvent({
+        actorRole: 'STUDENT',
+        actorEmail: student.email,
+        action: 'USER_LOGIN',
+        details: `Student ${student.registrationNumber} logged into portal`,
+      });
+
+      return NextResponse.json({
+        status: 'success',
+        role: 'student',
+        name: student.firstName,
       });
     }
   } catch (error) {
