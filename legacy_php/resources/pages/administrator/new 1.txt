@@ -1,0 +1,702 @@
+<?php
+session_start();
+ob_start();
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', 'C:/xampp/htdocs/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/php_errors.log');
+error_reporting(E_ALL);
+
+// Database connection
+$dsn = 'mysql:host=127.0.0.1;dbname=attendance-db;charset=utf8mb4';
+$username = 'root';
+$password = '';
+try {
+    $pdo = new PDO($dsn, $username, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+} catch (PDOException $e) {
+    error_log('Database connection failed: ' . $e->getMessage());
+    header('Content-Type: application/json');
+    echo json_encode(['status' => 'error', 'message' => 'Database connection failed']);
+    exit;
+}
+
+// Handle API requests
+$request = $_GET['request'] ?? $_POST['request'] ?? '';
+$response = ['status' => 'error', 'message' => 'Invalid request', 'data' => []];
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $request === 'get_data') {
+    $type = filter_var($_GET['type'] ?? '', FILTER_SANITIZE_STRING);
+    if ($type === 'courses') {
+        $stmt = $pdo->query("SELECT courseCode, name FROM tblcourse");
+        $response['data'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $response['status'] = 'success';
+    } elseif ($type === 'units') {
+        $courseCode = filter_var($_GET['course'] ?? '', FILTER_SANITIZE_STRING);
+        if ($courseCode) {
+            $stmt = $pdo->prepare("SELECT u.unitCode, u.name 
+                                  FROM tblunit u 
+                                  JOIN tblcourse c ON u.courseID = c.facultyID 
+                                  WHERE c.courseCode = :courseCode");
+            $stmt->execute([':courseCode' => $courseCode]);
+            $response['data'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $response['status'] = 'success';
+        } else {
+            $response['message'] = 'Missing course code';
+        }
+    } elseif ($type === 'venues') {
+        $stmt = $pdo->query("SELECT className FROM tblvenue");
+        $response['data'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $response['status'] = 'success';
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && $request === 'manageFolder') {
+    $courseID = filter_var($_POST['courseID'] ?? '', FILTER_SANITIZE_STRING);
+    $unitID = filter_var($_POST['unitID'] ?? '', FILTER_SANITIZE_STRING);
+    $venueID = filter_var($_POST['venueID'] ?? '', FILTER_SANITIZE_STRING);
+    if ($courseID && $unitID && $venueID) {
+        try {
+            $stmt = $pdo->prepare("SELECT registrationNumber, firstName, lastName FROM tblstudents WHERE courseCode = :courseID");
+            $stmt->execute([':courseID' => $courseID]);
+            $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            error_log("manageFolder: Found " . count($students) . " students for course $courseID");
+
+            $validLabels = [];
+            $html = '<table class="table table-striped table-bordered dataTable"><thead><tr><th>Reg No</th><th>Name</th><th>Course</th><th>Unit</th><th>Venue</th><th>Attendance</th></tr></thead><tbody>';
+            foreach ($students as $student) {
+                $labelDir = "resources/labels/{$student['registrationNumber']}";
+                $imageCount = is_dir($labelDir) ? count(glob("$labelDir/*.png")) : 0;
+                error_log("manageFolder: Checking $labelDir, found $imageCount images");
+                if ($imageCount >= 1) {
+                    $validLabels[] = $student['registrationNumber'];
+                    $html .= "<tr><td>" . htmlspecialchars($student['registrationNumber']) . "</td>";
+                    $html .= "<td>" . htmlspecialchars($student['firstName'] . ' ' . $student['lastName']) . "</td>";
+                    $html .= "<td>" . htmlspecialchars($courseID) . "</td>";
+                    $html .= "<td>" . htmlspecialchars($unitID) . "</td>";
+                    $html .= "<td>" . htmlspecialchars($venueID) . "</td>";
+                    $html .= "<td class='attendance-status'>Absent</td></tr>";
+                }
+            }
+            $html .= '</tbody></table>';
+            $response['status'] = empty($students) ? 'error' : (empty($validLabels) ? 'warning' : 'success');
+            $response['message'] = empty($students) ? 'No students found for this course' : (empty($validLabels) ? 'No students with valid images. Contact admin.' : 'Students loaded successfully');
+            $response['data'] = $validLabels;
+            $response['html'] = empty($students) ? '<div class="alert alert-danger">No students found for this course.</div>' : (empty($validLabels) ? '<div class="alert alert-warning">No students with valid images. Contact admin to add images.</div>' : $html);
+            error_log("manageFolder: Response status: {$response['status']}, message: {$response['message']}, validLabels: " . count($validLabels));
+        } catch (Exception $e) {
+            error_log('manageFolder error: ' . $e->getMessage());
+            $response['message'] = 'Server error processing students';
+        }
+    } else {
+        $response['message'] = 'Missing parameters';
+        error_log("manageFolder: Missing parameters - courseID: $courseID, unitID: $unitID, venueID: $venueID");
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && $request === 'save_attendance') {
+    $attendanceData = json_decode(file_get_contents("php://input"), true);
+    if ($attendanceData && is_array($attendanceData)) {
+        try {
+            $sql = "INSERT INTO tblattendance (studentRegistrationNumber, course, unit, attendanceStatus, dateMarked) 
+                    VALUES (:studentID, :course, :unit, :attendanceStatus, :date)";
+            $stmt = $pdo->prepare($sql);
+            foreach ($attendanceData as $data) {
+                $stmt->execute([
+                    ':studentID' => filter_var($data['studentID'], FILTER_SANITIZE_STRING),
+                    ':course' => filter_var($data['course'], FILTER_SANITIZE_STRING),
+                    ':unit' => filter_var($data['unit'], FILTER_SANITIZE_STRING),
+                    ':attendanceStatus' => filter_var($data['attendanceStatus'], FILTER_SANITIZE_STRING),
+                    ':date' => date("Y-m-d")
+                ]);
+            }
+            $response['status'] = 'success';
+            $response['message'] = 'Attendance recorded successfully';
+        } catch (PDOException $e) {
+            error_log('save_attendance error: ' . $e->getMessage());
+            $response['message'] = 'Error inserting attendance';
+        }
+    } else {
+        $response['message'] = 'Invalid attendance data';
+        error_log('save_attendance: Invalid attendance data');
+    }
+}
+
+if ($request) {
+    ob_end_clean();
+    header('Content-Type: application/json');
+    echo json_encode($response);
+    exit;
+}
+ob_end_clean();
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Attendance Dashboard</title>
+    <!-- AdminLTE CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@3.2.0/dist/css/adminlte.min.css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- AdminLTE JS -->
+    <script src="https://cdn.jsdelivr.net/npm/admin-lte@3.2.0/dist/js/adminlte.min.js"></script>
+    <!-- Face-API.js -->
+    <script src="http://localhost/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/javascript/face_logics/face-api.min.js"></script>
+    <style>
+        .video-container {
+            position: relative;
+            max-width: 640px;
+            margin: 0 auto;
+        }
+        #video {
+            width: 100%;
+            height: auto;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .spinner-overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            border-radius: 8px;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .btn-primary {
+            background-color: #2b6cb0;
+            border-color: #2b6cb0;
+        }
+        .btn-primary:hover {
+            background-color: #1a4971;
+            border-color: #1a4971;
+        }
+        .btn-success {
+            background-color: #2f855a;
+            border-color: #2f855a;
+        }
+        .btn-success:hover {
+            background-color: #22543d;
+            border-color: #22543d;
+        }
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .attendance-status.present {
+            color: #2f855a;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body class="hold-transition sidebar-mini layout-fixed">
+<div class="wrapper">
+    <!-- Navbar -->
+    <nav class="main-header navbar navbar-expand navbar-white navbar-light">
+        <ul class="navbar-nav">
+            <li class="nav-item">
+                <a class="nav-link" data-widget="pushmenu" href="#" role="button"><i class="fas fa-bars"></i></a>
+            </li>
+        </ul>
+        <ul class="navbar-nav ml-auto">
+            <li class="nav-item dropdown">
+                <a class="nav-link" data-toggle="dropdown" href="#">
+                    <i class="fas fa-user"></i>
+                    <span class="ml-2"><?php echo htmlspecialchars($_SESSION['firstName'] ?? 'Lecturer'); ?></span>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <a href="logout" class="dropdown-item"><i class="fas fa-sign-out-alt mr-2"></i> Logout</a>
+                </div>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" data-widget="control-sidebar" data-slide="true" href="#" role="button">
+                    <i class="fas fa-th-large"></i>
+                </a>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Sidebar -->
+    <aside class="main-sidebar sidebar-dark-primary elevation-4">
+        <a href="#" class="brand-link">
+            <span class="brand-text font-weight-light">Attendance <span class="text-info">Ms</span></span>
+        </a>
+        <div class="sidebar">
+            <nav class="mt-2">
+                <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
+                    <li class="nav-item">
+                        <a href="#" class="nav-link active" data-section="attendance">
+                            <i class="nav-icon fas fa-clipboard-check"></i>
+                            <p>Mark Attendance</p>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="lspa.php" class="nav-link">
+                            <i class="nav-icon fas fa-tachometer-alt"></i>
+                            <p>Dashboard</p>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Content Wrapper -->
+    <div class="content-wrapper">
+        <!-- Content Header -->
+        <div class="content-header">
+            <div class="container-fluid">
+                <h1 class="m-0">Mark Attendance</h1>
+            </div>
+        </div>
+        <!-- Main Content -->
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Toast Container -->
+                <div class="position-fixed top-0 end-0 p-3" style="z-index: 1050;">
+                    <div id="statusToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                        <div class="toast-header">
+                            <strong class="me-auto">Status</strong>
+                            <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+                        </div>
+                        <div class="toast-body"></div>
+                    </div>
+                </div>
+                <!-- Result Modal -->
+                <div class="modal fade" id="resultModal" tabindex="-1" aria-labelledby="resultModalLabel" aria-hidden="true">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="resultModalLabel">Recognition Result</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body" id="resultModalBody"></div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Selection Card -->
+                <div class="card card-primary card-outline mb-4 fade-in">
+                    <div class="card-header">
+                        <h3 class="card-title">Select Details</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4 mb-3">
+                                <label for="courseSelect">Course</label>
+                                <select id="courseSelect" class="form-control">
+                                    <option value="">Select Course</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="unitSelect">Unit</label>
+                                <select id="unitSelect" class="form-control">
+                                    <option value="">Select Unit</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 mb-3">
+                                <label for="venueSelect">Venue</label>
+                                <select id="venueSelect" class="form-control">
+                                    <option value="">Select Venue</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="text-center">
+                            <button id="startWebcam" class="btn btn-primary mr-2"><i class="fas fa-camera mr-2"></i> Start Webcam</button>
+                            <button id="captureImage" class="btn btn-success mr-2" style="display: none;"><i class="fas fa-camera-retro mr-2"></i> Capture Image</button>
+                            <button id="stopWebcam" class="btn btn-danger mr-2" style="display: none;"><i class="fas fa-stop mr-2"></i> Stop Webcam</button>
+                            <button id="endAttendance" class="btn btn-primary"><i class="fas fa-check-circle mr-2"></i> End Attendance</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Video Card -->
+                <div class="card card-primary card-outline mb-4 video-container" style="display: none;">
+                    <div class="card-body position-relative">
+                        <video id="video" autoplay></video>
+                        <div id="spinnerOverlay" class="spinner-overlay">
+                            <div class="spinner-border text-light" role="status">
+                                <span class="visually-hidden">Processing...</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Students Table -->
+                <div class="card card-primary card-outline fade-in">
+                    <div class="card-header">
+                        <h3 class="card-title">Students</h3>
+                        <div class="card-tools">
+                            <div class="input-group input-group-sm" style="width: 200px;">
+                                <input type="text" id="searchText" class="form-control float-right" placeholder="Search students">
+                                <div class="input-group-append">
+                                    <button type="button" class="btn btn-default" onclick="searchItems()">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body table-container">
+                        <div id="studentTableContainer"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Control Sidebar -->
+    <aside class="control-sidebar control-sidebar-dark"></aside>
+</div>
+
+<script>
+    let webcamStarted = false;
+    let modelsLoaded = false;
+    const successSound = new Audio('https://freesound.org/data/previews/484/484344_10734782-lq.mp3');
+    const errorSound = new Audio('https://freesound.org/data/previews/142/142608_2527786-lq.mp3');
+
+    function showToast(message, type = 'info') {
+        const toast = $('#statusToast');
+        toast.find('.toast-body').text(message);
+        toast.removeClass('bg-success bg-danger bg-info bg-warning');
+        toast.addClass(`bg-${type}`);
+        new bootstrap.Toast(toast[0], { delay: 3000 }).show();
+    }
+
+    function showModal(message) {
+        $('#resultModalBody').html(message);
+        new bootstrap.Modal($('#resultModal')[0]).show();
+    }
+
+    function searchItems() {
+        const input = $('#searchText').val().toLowerCase();
+        $('#studentTableContainer tr').each(function(index) {
+            if (index === 0) return;
+            const cells = $(this).find('td');
+            let found = false;
+            cells.each(function() {
+                if ($(this).text().toLowerCase().includes(input)) found = true;
+            });
+            $(this).toggle(found);
+        });
+    }
+
+    $(document).ready(function() {
+        // Check face-api.js
+        if (typeof faceapi === 'undefined') {
+            showToast('Face API failed to load. Check http://localhost/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/javascript/face_logics/face-api.min.js', 'danger');
+            errorSound.play().catch(() => console.warn('Error sound failed to play'));
+            return;
+        }
+
+        // Load courses
+        $.ajax({
+            url: 'attendance.php?request=get_data&type=courses',
+            type: 'GET',
+            dataType: 'json',
+            success: function(data) {
+                if (data.status === 'success') {
+                    $('#courseSelect').append(data.data.map(c => `<option value="${c.courseCode}">${c.name}</option>`));
+                } else {
+                    showToast(data.message, 'danger');
+                }
+            },
+            error: function(xhr, status, error) {
+                showToast('Error fetching courses: ' + error, 'danger');
+                console.error('Courses fetch error:', xhr.responseText);
+            }
+        });
+
+        // Load units
+        $('#courseSelect').change(function() {
+            const course = $(this).val();
+            $('#unitSelect').html('<option value="">Select Unit</option>');
+            if (course) {
+                $.ajax({
+                    url: `attendance.php?request=get_data&type=units&course=${encodeURIComponent(course)}`,
+                    type: 'GET',
+                    dataType: 'json',
+                    success: function(data) {
+                        if (data.status === 'success') {
+                            $('#unitSelect').append(data.data.map(u => `<option value="${u.unitCode}">${u.name}</option>`));
+                        } else {
+                            showToast(data.message, 'danger');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        showToast('Error fetching units: ' + error, 'danger');
+                        console.error('Units fetch error:', xhr.responseText);
+                    }
+                });
+            }
+        });
+
+        // Load venues
+        $.ajax({
+            url: 'attendance.php?request=get_data&type=venues',
+            type: 'GET',
+            dataType: 'json',
+            success: function(data) {
+                if (data.status === 'success') {
+                    $('#venueSelect').append(data.data.map(v => `<option value="${v.className}">${v.className}</option>`));
+                } else {
+                    showToast(data.message, 'danger');
+                }
+            },
+            error: function(xhr, status, error) {
+                showToast('Error fetching venues: ' + error, 'danger');
+                console.error('Venues fetch error:', xhr.responseText);
+            }
+        });
+
+        // Load face-api models
+        const modelPath = 'http://localhost/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/models/';
+        Promise.all([
+            faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
+            faceapi.nets.faceRecognitionNet.loadFromUri(modelPath),
+            faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
+        ])
+            .then(() => {
+                modelsLoaded = true;
+                showToast('Face recognition models loaded successfully', 'success');
+                successSound.play().catch(() => console.warn('Success sound failed to play'));
+            })
+            .catch(err => {
+                showToast('Failed to load face recognition models. Check model files in C:/xampp/htdocs/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/models/', 'danger');
+                console.error('Model loading error:', err);
+                errorSound.play().catch(() => console.warn('Error sound failed to play'));
+            });
+
+        // Load students
+        $('#courseSelect, #unitSelect, #venueSelect').change(function() {
+            const course = $('#courseSelect').val();
+            const unit = $('#unitSelect').val();
+            const venue = $('#venueSelect').val();
+            if (course && unit && venue) {
+                $.ajax({
+                    url: 'attendance.php?request=manageFolder',
+                    type: 'POST',
+                    contentType: 'application/x-www-form-urlencoded',
+                    data: `courseID=${encodeURIComponent(course)}&unitID=${encodeURIComponent(unit)}&venueID=${encodeURIComponent(venue)}`,
+                    dataType: 'json',
+                    success: function(data) {
+                        try {
+                            if (data.status === 'success') {
+                                window.labels = data.data;
+                                $('#studentTableContainer').html(data.html);
+                                showToast('Student data loaded successfully', 'success');
+                                successSound.play().catch(() => console.warn('Success sound failed to play'));
+                            } else {
+                                $('#studentTableContainer').html(data.html);
+                                showToast(data.message, data.status === 'warning' ? 'warning' : 'danger');
+                                errorSound.play().catch(() => console.warn('Error sound failed to play'));
+                            }
+                        } catch (e) {
+                            showToast('Error parsing student data: Invalid server response', 'danger');
+                            console.error('Parse error:', e, 'Response:', data);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        showToast('Error fetching student data: ' + error, 'danger');
+                        console.error('manageFolder error:', xhr.responseText);
+                    }
+                });
+            }
+        });
+
+        // Start Webcam
+        $('#startWebcam').click(function() {
+            if (!webcamStarted && modelsLoaded) {
+                navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                    .then(stream => {
+                        $('#video')[0].srcObject = stream;
+                        webcamStarted = true;
+                        $('.video-container').show();
+                        $('#captureImage, #stopWebcam').show();
+                        showToast('Webcam started successfully', 'success');
+                        successSound.play().catch(() => console.warn('Success sound failed to play'));
+                    })
+                    .catch(error => {
+                        showToast('Failed to access webcam: ' + error.message, 'danger');
+                        errorSound.play().catch(() => console.warn('Error sound failed to play'));
+                    });
+            } else if (!modelsLoaded) {
+                showToast('Face recognition models not loaded yet. Please wait.', 'warning');
+            }
+        });
+
+        // Stop Webcam
+        $('#stopWebcam').click(function() {
+            const video = $('#video')[0];
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                webcamStarted = false;
+                $('.video-container').hide();
+                $('#captureImage, #stopWebcam').hide();
+                showToast('Webcam stopped', 'info');
+            }
+        });
+
+        // Capture and Compare Image
+        $('#captureImage').click(async function() {
+            if ($(this).hasClass('disabled')) return;
+            $(this).addClass('disabled');
+            $('#spinnerOverlay').show();
+            showToast('Capturing and comparing face...', 'info');
+
+            const video = $('#video')[0];
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/png');
+
+            if (!window.labels || window.labels.length === 0) {
+                showModal('<div class="alert alert-warning">No students with valid images. Contact admin to add images.</div>');
+                showToast('No student images available', 'warning');
+                $('#spinnerOverlay').hide();
+                $(this).removeClass('disabled');
+                $('#stopWebcam').click();
+                return;
+            }
+
+            try {
+                const labeledFaceDescriptors = await getLabeledFaceDescriptions();
+                if (labeledFaceDescriptors.length === 0) {
+                    showModal('<div class="alert alert-warning">No valid face descriptors loaded. Contact admin.</div>');
+                    showToast('No valid face descriptors', 'warning');
+                    $('#spinnerOverlay').hide();
+                    $(this).removeClass('disabled');
+                    $('#stopWebcam').click();
+                    return;
+                }
+
+                const img = await faceapi.fetchImage(imageData);
+                const detection = await faceapi
+                    .detectSingleFace(img)
+                    .withFaceLandmarks()
+                    .withFaceDescriptor();
+
+                if (!detection) {
+                    showModal('<div class="alert alert-danger">No face detected in the captured image. Please try again.</div>');
+                    showToast('No face detected', 'danger');
+                    errorSound.play().catch(() => console.warn('Error sound failed to play'));
+                    $('#spinnerOverlay').hide();
+                    $(this).removeClass('disabled');
+                    return;
+                }
+
+                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors);
+                const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+
+                if (bestMatch.label !== 'unknown') {
+                    markAttendance([bestMatch.label]);
+                    showModal(`<div class="alert alert-success">Recognized: ${bestMatch.label}</div>`);
+                    showToast(`Recognized: ${bestMatch.label}`, 'success');
+                    successSound.play().catch(() => console.warn('Success sound failed to play'));
+                } else {
+                    showModal('<div class="alert alert-danger">Face not recognized. No match found.</div>');
+                    showToast('Face not recognized', 'danger');
+                    errorSound.play().catch(() => console.warn('Error sound failed to play'));
+                }
+            } catch (error) {
+                showModal('<div class="alert alert-danger">Error processing image: ' + error.message + '</div>');
+                showToast('Error processing image', 'danger');
+                console.error('Image comparison error:', error);
+                errorSound.play().catch(() => console.warn('Error sound failed to play'));
+            }
+
+            $('#spinnerOverlay').hide();
+            $(this).removeClass('disabled');
+            $('#stopWebcam').click();
+        });
+
+        async function getLabeledFaceDescriptions() {
+            const labeledDescriptors = [];
+            for (const label of window.labels || []) {
+                const descriptions = [];
+                let validImages = 0;
+                for (let i = 1; i <= 5; i++) {
+                    try {
+                        const img = await faceapi.fetchImage(`http://localhost/T/Face-Recognition-Attendance-System-main/resources/labels/${label}/${i}.png`);
+                        const detections = await faceapi
+                            .detectSingleFace(img)
+                            .withFaceLandmarks()
+                            .withFaceDescriptor();
+                        if (detections) {
+                            descriptions.push(detections.descriptor);
+                            validImages++;
+                        }
+                    } catch (error) {
+                        console.warn(`Error loading http://localhost/T/Face-Recognition-Attendance-System-main/resources/labels/${label}/${i}.png: ${error.message}`);
+                    }
+                }
+                if (descriptions.length > 0) {
+                    labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(label, descriptions));
+                }
+            }
+            return labeledDescriptors;
+        }
+
+        function markAttendance(detectedFaces) {
+            $('#studentTableContainer tr').each(function(index) {
+                if (index === 0) return;
+                const registrationNumber = $(this).find('td').eq(0).text().trim();
+                if (detectedFaces.includes(registrationNumber)) {
+                    $(this).find('.attendance-status').text('Present').addClass('present');
+                }
+            });
+        }
+
+        // End Attendance
+        $('#endAttendance').click(function() {
+            if (!window.labels || window.labels.length === 0) {
+                showToast('No students loaded. Please select course, unit, and venue.', 'warning');
+                return;
+            }
+            const attendanceData = [];
+            $('#studentTableContainer tr').each(function(index) {
+                if (index === 0) return;
+                const studentID = $(this).find('td').eq(0).text().trim();
+                const course = $(this).find('td').eq(2).text().trim();
+                const unit = $(this).find('td').eq(3).text().trim();
+                const attendanceStatus = $(this).find('.attendance-status').text().trim();
+                attendanceData.push({ studentID, course, unit, attendanceStatus });
+            });
+
+            $.ajax({
+                url: 'attendance.php?request=save_attendance',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(attendanceData),
+                dataType: 'json',
+                success: function(response) {
+                    showToast(response.message, response.status);
+                    if (response.status === 'success') {
+                        $('#studentTableContainer').empty();
+                        $('#courseSelect, #unitSelect, #venueSelect').val('');
+                    }
+                },
+                error: function(xhr, status, error) {
+                    showToast('Error saving attendance: ' + error, 'danger');
+                    console.error('save_attendance error:', xhr.responseText);
+                }
+            });
+        });
+    });
+</script>
+</body>
+</html>

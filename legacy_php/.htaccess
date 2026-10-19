@@ -1,0 +1,8 @@
+# Minimal .htaccess file without URL rewriting
+# Add other configurations here if needed (e.g., for security or caching)
+
+# Example: Deny access to sensitive files
+<FilesMatch "\.(env|ini|log)$">
+    Order Allow,Deny
+    Deny from all
+</FilesMatch>

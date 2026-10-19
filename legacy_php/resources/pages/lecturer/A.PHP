@@ -1,0 +1,887 @@
+<?php
+session_start();
+ob_start();
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+ini_set('error_log', 'C:/xampp/htdocs/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/php_errors.log');
+error_reporting(E_ALL);
+
+// Database connection
+$dsn = 'mysql:host=127.0.0.1;dbname=attendance-db;charset=utf8mb4';
+$username = 'root';
+$password = '';
+try {
+    $pdo = new PDO($dsn, $username, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+} catch (PDOException $e) {
+    error_log('Database connection failed: ' . $e->getMessage());
+    header('Content-Type: application/json');
+    echo json_encode(['status' => 'error', 'message' => 'Database connection failed']);
+    exit;
+}
+
+// Handle API requests
+$request = $_GET['request'] ?? $_POST['request'] ?? '';
+$response = ['status' => 'error', 'message' => 'Invalid request', 'data' => []];
+
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && $request === 'get_data') {
+    $type = filter_var($_GET['type'] ?? '', FILTER_SANITIZE_SPECIAL_CHARS);
+    if ($type === 'courses') {
+        $stmt = $pdo->query("SELECT courseCode, name FROM tblcourse");
+        $response['data'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $response['status'] = 'success';
+    } elseif ($type === 'units') {
+        $courseCode = filter_var($_GET['course'] ?? '', FILTER_SANITIZE_SPECIAL_CHARS);
+        if ($courseCode) {
+            $stmt = $pdo->prepare("SELECT u.unitCode, u.name 
+                                  FROM tblunit u 
+                                  JOIN tblcourse c ON u.courseID = c.facultyID 
+                                  WHERE c.courseCode = :courseCode");
+            $stmt->execute([':courseCode' => $courseCode]);
+            $response['data'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $response['status'] = 'success';
+        } else {
+            $response['message'] = 'Missing course code';
+        }
+    } elseif ($type === 'venues') {
+        $stmt = $pdo->query("SELECT className FROM tblvenue");
+        $response['data'] = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $response['status'] = 'success';
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && $request === 'manageFolder') {
+    $courseID = filter_var($_POST['courseID'] ?? '', FILTER_SANITIZE_SPECIAL_CHARS);
+    $unitID = filter_var($_POST['unitID'] ?? '', FILTER_SANITIZE_SPECIAL_CHARS);
+    $venueID = filter_var($_POST['venueID'] ?? '', FILTER_SANITIZE_SPECIAL_CHARS);
+    if ($courseID && $unitID && $venueID) {
+        try {
+            $stmt = $pdo->prepare("SELECT registrationNumber, firstName, lastName FROM tblstudents WHERE courseCode = :courseID");
+            $stmt->execute([':courseID' => $courseID]);
+            $students = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            error_log("manageFolder: Found " . count($students) . " students for course $courseID");
+
+            $validLabels = [];
+            $html = '<table class="table table-striped table-bordered"><thead><tr><th>Reg No</th><th>Name</th><th>Course</th><th>Unit</th><th>Venue</th><th>Attendance</th><th>Time Marked</th></tr></thead><tbody>';
+            foreach ($students as $student) {
+                $labelDir = "resources/labels/{$student['registrationNumber']}";
+                $imageCount = is_dir($labelDir) ? count(glob("$labelDir/*.png")) : 0;
+                error_log("manageFolder: Checking $labelDir, found $imageCount images");
+                if ($imageCount >= 1) {
+                    $validLabels[] = $student['registrationNumber'];
+                    $html .= "<tr><td>" . htmlspecialchars($student['registrationNumber']) . "</td>";
+                    $html .= "<td>" . htmlspecialchars($student['firstName'] . ' ' . $student['lastName']) . "</td>";
+                    $html .= "<td>" . htmlspecialchars($courseID) . "</td>";
+                    $html .= "<td>" . htmlspecialchars($unitID) . "</td>";
+                    $html .= "<td>" . htmlspecialchars($venueID) . "</td>";
+                    $html .= "<td class='attendance-status'>Absent</td>";
+                    $html .= "<td class='attendance-time'>-</td></tr>";
+                }
+            }
+            $html .= '</tbody></table>';
+            $response['status'] = empty($students) ? 'error' : (empty($validLabels) ? 'warning' : 'success');
+            $response['message'] = empty($students) ? 'No students found for this course' : (empty($validLabels) ? 'No students with valid images. Contact admin.' : 'Students loaded successfully');
+            $response['data'] = $validLabels;
+            $response['html'] = empty($students) ? '<div class="alert alert-danger">No students found for this course.</div>' : (empty($validLabels) ? '<div class="alert alert-warning">No students with valid images. Contact admin to add images.</div>' : $html);
+            error_log("manageFolder: Response status: {$response['status']}, message: {$response['message']}, validLabels: " . count($validLabels));
+        } catch (Exception $e) {
+            error_log('manageFolder error: ' . $e->getMessage());
+            $response['message'] = 'Server error processing students';
+        }
+    } else {
+        $response['message'] = 'Missing parameters';
+        error_log("manageFolder: Missing parameters - courseID: $courseID, unitID: $unitID, venueID: $venueID");
+    }
+} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && $request === 'save_attendance') {
+    $attendanceData = json_decode(file_get_contents("php://input"), true);
+    if ($attendanceData && is_array($attendanceData)) {
+        try {
+            $sql = "INSERT INTO tblattendance (studentRegistrationNumber, course, unit, attendanceStatus, dateMarked, timeMarked) 
+                    VALUES (:studentID, :course, :unit, :attendanceStatus, :date, :time)
+                    ON DUPLICATE KEY UPDATE attendanceStatus = :attendanceStatus, timeMarked = :time";
+            $stmt = $pdo->prepare($sql);
+            foreach ($attendanceData as $data) {
+                // Validate data
+                if (!isset($data['studentID'], $data['course'], $data['unit'], $data['attendanceStatus'])) {
+                    error_log("save_attendance: Invalid data - " . json_encode($data));
+                    continue;
+                }
+                try {
+                    $stmt->execute([
+                        ':studentID' => filter_var($data['studentID'], FILTER_SANITIZE_SPECIAL_CHARS),
+                        ':course' => filter_var($data['course'], FILTER_SANITIZE_SPECIAL_CHARS),
+                        ':unit' => filter_var($data['unit'], FILTER_SANITIZE_SPECIAL_CHARS),
+                        ':attendanceStatus' => filter_var($data['attendanceStatus'], FILTER_SANITIZE_SPECIAL_CHARS),
+                        ':date' => date("Y-m-d"),
+                        ':time' => $data['timeMarked'] ?? date("H:i:s")
+                    ]);
+                } catch (PDOException $e) {
+                    error_log("save_attendance: Error for student {$data['studentID']}: " . $e->getMessage());
+                    throw new Exception("Error inserting attendance for student {$data['studentID']}: " . $e->getMessage());
+                }
+            }
+            $response['status'] = 'success';
+            $response['message'] = 'Attendance recorded successfully';
+        } catch (Exception $e) {
+            error_log('save_attendance error: ' . $e->getMessage());
+            $response['message'] = 'Error inserting attendance: ' . $e->getMessage();
+        }
+    } else {
+        $response['message'] = 'Invalid attendance data';
+        error_log('save_attendance: Invalid attendance data');
+    }
+}
+
+if ($request) {
+    ob_end_clean();
+    header('Content-Type: application/json');
+    echo json_encode($response);
+    exit;
+}
+ob_end_clean();
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Attendance System</title>
+    <!-- AdminLTE CSS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/admin-lte@3.2.0/dist/css/adminlte.min.css">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css">
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- SweetAlert2 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- AdminLTE JS -->
+    <script src="https://cdn.jsdelivr.net/npm/admin-lte@3.2.0/dist/js/adminlte.min.js"></script>
+    <!-- SweetAlert2 JS -->
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <!-- Face-API.js -->
+    <script src="http://localhost/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/javascript/face_logics/face-api.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .content-wrapper {
+            background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+        }
+        .video-container {
+            position: relative;
+            max-width: 640px;
+            margin: 0 auto;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            background: #fff;
+        }
+        #video {
+            width: 100%;
+            height: auto;
+            background: #000;
+        }
+        .spinner-overlay {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 60px;
+            height: 60px;
+            border: 6px solid rgba(255, 255, 255, 0.2);
+            border-top: 6px solid #00a896;
+            border-radius: 50%;
+            animation: spin 0.8s ease-in-out infinite;
+            z-index: 10;
+        }
+        .spinner-text {
+            position: absolute;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 16px;
+            font-weight: 700;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+            text-align: center;
+        }
+        .spinner-text::after {
+            content: '';
+            display: block;
+            margin-top: 4px;
+            animation: dots 1.5s steps(5, end) infinite;
+        }
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        @keyframes dots {
+            0% { content: ''; }
+            20% { content: '.'; }
+            40% { content: '..'; }
+            60% { content: '...'; }
+            80% { content: '....'; }
+            100% { content: '.....'; }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .btn-custom {
+            background: linear-gradient(45deg, #028090, #00a896);
+            color: white;
+            border: none;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        .btn-custom:hover {
+            background: linear-gradient(45deg, #026670, #008573);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+        }
+        .btn-success-custom {
+            background: linear-gradient(45deg, #16a34a, #4ade80);
+        }
+        .btn-success-custom:hover {
+            background: linear-gradient(45deg, #15803d, #16a34a);
+        }
+        .card {
+            border: none;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease;
+        }
+        .card:hover {
+            box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+        }
+        .table-container {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .attendance-status.present {
+            color: #16a34a;
+            font-weight: 600;
+            animation: highlight 0.5s ease;
+        }
+        @keyframes highlight {
+            0% { background-color: #dcfce7; }
+            100% { background-color: transparent; }
+        }
+        .main-sidebar {
+            background: linear-gradient(180deg, #003049 0%, #004b6b 100%);
+        }
+        .nav-link.active {
+            background: #00a896 !important;
+            color: white !important;
+            border-radius: 6px;
+        }
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white !important;
+        }
+        .brand-link {
+            background: #003049;
+            color: white !important;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        select.form-control {
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2300a896'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.75rem center;
+            background-size: 1.5em;
+            padding-right: 2.5rem;
+        }
+        .swal2-popup {
+            border-radius: 12px !important;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+    </style>
+</head>
+<body class="hold-transition sidebar-mini layout-fixed">
+<div class="wrapper">
+    <!-- Navbar -->
+    <nav class="main-header navbar navbar-expand navbar-dark" style="background: linear-gradient(90deg, #003049, #00a896);">
+        <ul class="navbar-nav">
+            <li class="nav-item">
+                <a class="nav-link" data-widget="pushmenu" href="#" role="button"><i class="fas fa-bars"></i></a>
+            </li>
+        </ul>
+        <ul class="navbar-nav ml-auto">
+            <li class="nav-item dropdown">
+                <a class="nav-link" data-toggle="dropdown" href="#">
+                    <i class="fas fa-user mr-2"></i><?php echo htmlspecialchars($_SESSION['firstName'] ?? 'Lecturer'); ?>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right">
+                    <a href="logout" class="dropdown-item"><i class="fas fa-sign-out-alt mr-2"></i> Logout</a>
+                </div>
+            </li>
+        </ul>
+    </nav>
+
+    <!-- Sidebar -->
+    <aside class="main-sidebar sidebar-dark-primary elevation-4">
+        <a href="#" class="brand-link">
+            <span class="brand-text font-weight-bold">Smart Attendance <span style="color: #00a896;">Ms</span></span>
+        </a>
+        <div class="sidebar">
+            <nav class="mt-2">
+                <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
+                    <li class="nav-item">
+                        <a href="#" class="nav-link active" data-section="attendance">
+                            <i class="nav-icon fas fa-clipboard-check"></i>
+                            <p>Mark Attendance</p>
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="lspa.php" class="nav-link">
+                            <i class="nav-icon fas fa-tachometer-alt"></i>
+                            <p>Dashboard</p>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </div>
+    </aside>
+
+    <!-- Content Wrapper -->
+    <div class="content-wrapper">
+        <!-- Content Header -->
+        <div class="content-header">
+            <div class="container-fluid">
+                <h1 class="m-0 text-dark">Smart Attendance System</h1>
+            </div>
+        </div>
+        <!-- Main Content -->
+        <section class="content">
+            <div class="container-fluid">
+                <!-- Selection Card -->
+                <div class="card card-primary card-outline p-4 mb-4 fade-in">
+                    <div class="card-header">
+                        <h3 class="card-title">Session Details</h3>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-md-4 form-group">
+                                <label for="courseSelect">Course</label>
+                                <select id="courseSelect" class="form-control">
+                                    <option value="">Select Course</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 form-group">
+                                <label for="unitSelect">Unit</label>
+                                <select id="unitSelect" class="form-control">
+                                    <option value="">Select Unit</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 form-group">
+                                <label for="venueSelect">Venue</label>
+                                <select id="venueSelect" class="form-control">
+                                    <option value="">Select Venue</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-center mt-4">
+                            <button id="startAttendance" class="btn btn-custom mr-2"><i class="fas fa-play-circle mr-2"></i>Start Attendance</button>
+                            <button id="captureImage" class="btn btn-success-custom mr-2 hidden"><i class="fas fa-camera-retro mr-2"></i>Capture Image</button>
+                            <button id="endAttendance" class="btn btn-custom hidden"><i class="fas fa-check-circle mr-2"></i>End Attendance</button>
+                        </div>
+                    </div>
+                </div>
+                <!-- Video Card -->
+                <div class="card card-primary card-outline video-container mb-4 hidden fade-in">
+                    <div class="card-body p-0">
+                        <video id="video" autoplay class="w-100"></video>
+                        <div id="spinnerOverlay" class="spinner-overlay">
+                            <span class="spinner-text">Analyzing Face</span>
+                        </div>
+                    </div>
+                </div>
+                <!-- Attended Students Table -->
+                <div class="card card-primary card-outline p-4 fade-in">
+                    <div class="card-header">
+                        <h3 class="card-title">Attended Students</h3>
+                        <div class="card-tools">
+                            <div class="input-group input-group-sm">
+                                <input type="text" id="searchText" class="form-control" placeholder="Search students">
+                                <div class="input-group-append">
+                                    <button type="button" class="btn btn-default" onclick="searchItems()">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body table-responsive p-0">
+                        <div id="studentTableContainer"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+</div>
+
+<script>
+    let webcamStarted = false;
+    let modelsLoaded = false;
+    let attendanceStarted = false;
+    let markedStudents = new Map();
+    const MODEL_LOAD_TIMEOUT = 10000;
+    const AJAX_TIMEOUT = 5000;
+
+    function showAlert(message, type = 'info') {
+        Swal.fire({
+            icon: type,
+            title: type.charAt(0).toUpperCase() + type.slice(1),
+            text: message,
+            showConfirmButton: false,
+            timer: 3000,
+            position: 'center',
+            background: '#fff',
+            customClass: {
+                popup: 'swal2-popup'
+            }
+        });
+    }
+
+    function showModal(message) {
+        Swal.fire({
+            title: 'Recognition Result',
+            html: message,
+            showConfirmButton: true,
+            confirmButtonText: 'Close',
+            confirmButtonColor: '#00a896',
+            position: 'center',
+            customClass: {
+                popup: 'swal2-popup'
+            }
+        });
+    }
+
+    function searchItems() {
+        const input = $('#searchText').val().toLowerCase();
+        $('#studentTableContainer tr').each(function(index) {
+            if (index === 0) return;
+            const cells = $(this).find('td');
+            let found = false;
+            cells.each(function() {
+                if ($(this).text().toLowerCase().includes(input)) found = true;
+            });
+            $(this).toggle(found);
+        });
+    }
+
+    function startWebcam() {
+        return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Webcam initialization timed out')), 5000);
+            navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+                .then(stream => {
+                    clearTimeout(timeout);
+                    $('#video')[0].srcObject = stream;
+                    webcamStarted = true;
+                    $('.video-container').removeClass('hidden');
+                    $('#captureImage').removeClass('hidden');
+                    resolve();
+                })
+                .catch(error => {
+                    clearTimeout(timeout);
+                    console.error('Webcam error:', error);
+                    reject(error);
+                });
+        });
+    }
+
+    function stopWebcam() {
+        const video = $('#video')[0];
+        if (video.srcObject) {
+            video.srcObject.getTracks().forEach(track => track.stop());
+            video.srcObject = null;
+            webcamStarted = false;
+            $('.video-container').addClass('hidden');
+            $('#captureImage').addClass('hidden');
+        }
+    }
+
+    async function loadFaceApiModels() {
+        const modelPath = 'http://localhost/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/models/';
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                await Promise.race([
+                    Promise.all([
+                        faceapi.nets.ssdMobilenetv1.loadFromUri(modelPath),
+                        faceapi.nets.faceRecognitionNet.loadFromUri(modelPath),
+                        faceapi.nets.faceLandmark68Net.loadFromUri(modelPath),
+                    ]),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Model loading timed out')), MODEL_LOAD_TIMEOUT))
+                ]);
+                modelsLoaded = true;
+                console.log('Face-api models loaded successfully');
+                return;
+            } catch (err) {
+                console.warn(`Model loading attempt ${attempt} failed: ${err.message}`);
+                if (attempt === 3) {
+                    console.error('Failed to load face-api models after 3 attempts:', err);
+                }
+            }
+        }
+    }
+
+    $(document).ready(function() {
+        // Check face-api.js
+        if (typeof faceapi === 'undefined') {
+            showAlert('Face API failed to load. Check http://localhost/T/Face-Recognition-Attendance-System-main/resources/pages/lecturer/javascript/face_logics/face-api.min.js', 'error');
+            return;
+        }
+
+        // Start loading models immediately
+        loadFaceApiModels();
+
+        // Load courses
+        $.ajax({
+            url: 'attendance.php?request=get_data&type=courses',
+            type: 'GET',
+            dataType: 'json',
+            timeout: AJAX_TIMEOUT,
+            beforeSend: function() {
+                Swal.fire({
+                    title: 'Loading Courses...',
+                    didOpen: () => Swal.showLoading(),
+                    allowOutsideClick: false,
+                    position: 'center'
+                });
+            },
+            success: function(data) {
+                Swal.close();
+                if (data.status === 'success') {
+                    $('#courseSelect').append(data.data.map(c => `<option value="${c.courseCode}">${c.name}</option>`));
+                } else {
+                    showAlert(data.message, 'error');
+                }
+            },
+            error: function(xhr, status, error) {
+                Swal.close();
+                showAlert('Error fetching courses: ' + error, 'error');
+                console.error('Courses fetch error:', xhr.responseText);
+            }
+        });
+
+        // Load units
+        $('#courseSelect').change(function() {
+            const course = $(this).val();
+            $('#unitSelect').html('<option value="">Select Unit</option>');
+            if (course) {
+                $.ajax({
+                    url: `attendance.php?request=get_data&type=units&course=${encodeURIComponent(course)}`,
+                    type: 'GET',
+                    dataType: 'json',
+                    timeout: AJAX_TIMEOUT,
+                    beforeSend: function() {
+                        Swal.fire({
+                            title: 'Loading Units...',
+                            didOpen: () => Swal.showLoading(),
+                            allowOutsideClick: false,
+                            position: 'center'
+                        });
+                    },
+                    success: function(data) {
+                        Swal.close();
+                        if (data.status === 'success') {
+                            $('#unitSelect').append(data.data.map(u => `<option value="${u.unitCode}">${u.name}</option>`));
+                        } else {
+                            showAlert(data.message, 'error');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        Swal.close();
+                        showAlert('Error fetching units: ' + error, 'error');
+                        console.error('Units fetch error:', xhr.responseText);
+                    }
+                });
+            }
+        });
+
+        // Load venues
+        $.ajax({
+            url: 'attendance.php?request=get_data&type=venues',
+            type: 'GET',
+            dataType: 'json',
+            timeout: AJAX_TIMEOUT,
+            beforeSend: function() {
+                Swal.fire({
+                    title: 'Loading Venues...',
+                    didOpen: () => Swal.showLoading(),
+                    allowOutsideClick: false,
+                    position: 'center'
+                });
+            },
+            success: function(data) {
+                Swal.close();
+                if (data.status === 'success') {
+                    $('#venueSelect').append(data.data.map(v => `<option value="${v.className}">${v.className}</option>`));
+                } else {
+                    showAlert(data.message, 'error');
+                }
+            },
+            error: function(xhr, status, error) {
+                Swal.close();
+                showAlert('Error fetching venues: ' + error, 'error');
+                console.error('Venues fetch error:', xhr.responseText);
+            }
+        });
+
+        // Load students
+        $('#courseSelect, #unitSelect, #venueSelect').change(function() {
+            const course = $('#courseSelect').val();
+            const unit = $('#unitSelect').val();
+            const venue = $('#venueSelect').val();
+            if (course && unit && venue) {
+                $.ajax({
+                    url: 'attendance.php?request=manageFolder',
+                    type: 'POST',
+                    contentType: 'application/x-www-form-urlencoded',
+                    data: `courseID=${encodeURIComponent(course)}&unitID=${encodeURIComponent(unit)}&venueID=${encodeURIComponent(venue)}`,
+                    dataType: 'json',
+                    timeout: AJAX_TIMEOUT,
+                    beforeSend: function() {
+                        Swal.fire({
+                            title: 'Loading Students...',
+                            didOpen: () => Swal.showLoading(),
+                            allowOutsideClick: false,
+                            position: 'center'
+                        });
+                    },
+                    success: function(data) {
+                        Swal.close();
+                        try {
+                            if (data.status === 'success') {
+                                window.labels = data.data;
+                                $('#studentTableContainer').html(data.html);
+                            } else {
+                                $('#studentTableContainer').html(data.html);
+                                showAlert(data.message, data.status === 'warning' ? 'warning' : 'error');
+                            }
+                        } catch (e) {
+                            showAlert('Error parsing student data: Invalid server response', 'error');
+                            console.error('Parse error:', e, 'Response:', data);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        Swal.close();
+                        showAlert('Error fetching student data: ' + error, 'error');
+                        console.error('manageFolder error:', xhr.responseText);
+                    }
+                });
+            }
+        });
+
+        // Start Attendance
+        $('#startAttendance').click(async function() {
+            const course = $('#courseSelect').val();
+            const unit = $('#unitSelect').val();
+            const venue = $('#venueSelect').val();
+            if (!course || !unit || !venue) {
+                showAlert('Please select course, unit, and venue before starting attendance.', 'warning');
+                return;
+            }
+            if (!webcamStarted) {
+                try {
+                    await startWebcam();
+                    attendanceStarted = true;
+                    markedStudents.clear();
+                    $('#endAttendance').removeClass('hidden');
+                    $('#startAttendance').addClass('hidden');
+                } catch (error) {
+                    showAlert('Failed to start webcam: ' + error.message, 'error');
+                }
+            }
+        });
+
+        // Capture and Compare Image
+        $('#captureImage').click(async function() {
+            if ($(this).hasClass('disabled')) return;
+            $(this).addClass('disabled');
+            $('#spinnerOverlay').show();
+
+            const video = $('#video')[0];
+            const canvas = document.createElement('canvas');
+            canvas.width = 320;
+            canvas.height = 240;
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/png');
+
+            // Stop webcam
+            stopWebcam();
+
+            if (!window.labels || window.labels.length === 0) {
+                showModal('<div class="alert alert-warning">No students with valid images. Contact admin to add images.</div>');
+                $('#spinnerOverlay').hide();
+                $(this).removeClass('disabled');
+                if (attendanceStarted) startWebcam().then(() => $(this).removeClass('disabled'));
+                return;
+            }
+
+            try {
+                if (!modelsLoaded) {
+                    await loadFaceApiModels();
+                    if (!modelsLoaded) {
+                        showModal('<div class="alert alert-danger">Failed to load face recognition models. Please try again.</div>');
+                        $('#spinnerOverlay').hide();
+                        $(this).removeClass('disabled');
+                        if (attendanceStarted) startWebcam().then(() => $(this).removeClass('disabled'));
+                        return;
+                    }
+                }
+
+                const labeledFaceDescriptors = await getLabeledFaceDescriptions();
+                if (labeledFaceDescriptors.length === 0) {
+                    showModal('<div class="alert alert-warning">No valid face descriptors loaded. Contact admin.</div>');
+                    $('#spinnerOverlay').hide();
+                    $(this).removeClass('disabled');
+                    if (attendanceStarted) startWebcam().then(() => $(this).removeClass('disabled'));
+                    return;
+                }
+
+                const img = await faceapi.fetchImage(imageData);
+                const detection = await faceapi
+                    .detectSingleFace(img)
+                    .withFaceLandmarks()
+                    .withFaceDescriptor();
+
+                if (!detection) {
+                    showModal('<div class="alert alert-danger">No face detected in the captured image. Please try again.</div>');
+                    $('#spinnerOverlay').hide();
+                    $(this).removeClass('disabled');
+                    if (attendanceStarted) startWebcam().then(() => $(this).removeClass('disabled'));
+                    return;
+                }
+
+                const faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors);
+                const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+
+                if (bestMatch.label !== 'unknown') {
+                    if (markedStudents.has(bestMatch.label)) {
+                        const timeMarked = markedStudents.get(bestMatch.label);
+                        showModal(`<div class="alert alert-warning">Attendance already marked for ${bestMatch.label} at ${timeMarked}.</div>`);
+                    } else {
+                        markAttendance([bestMatch.label]);
+                        showModal(`<div class="alert alert-success">Recognized: ${bestMatch.label}</div>`);
+                    }
+                } else {
+                    showModal('<div class="alert alert-danger">Face not recognized. No match found.</div>');
+                }
+            } catch (error) {
+                showModal('<div class="alert alert-danger">Error processing image: ' + error.message + '</div>');
+                console.error('Image comparison error:', error);
+            }
+
+            $('#spinnerOverlay').hide();
+            $(this).removeClass('disabled');
+            if (attendanceStarted) startWebcam().then(() => $(this).removeClass('disabled'));
+        });
+
+        async function getLabeledFaceDescriptions() {
+            const labeledDescriptors = [];
+            for (const label of window.labels || []) {
+                const descriptions = [];
+                for (let i = 1; i <= 5; i++) {
+                    try {
+                        const img = await faceapi.fetchImage(`http://localhost/T/Face-Recognition-Attendance-System-main/resources/labels/${label}/${i}.png`);
+                        const detections = await faceapi
+                            .detectSingleFace(img)
+                            .withFaceLandmarks()
+                            .withFaceDescriptor();
+                        if (detections) {
+                            descriptions.push(detections.descriptor);
+                        }
+                    } catch (error) {
+                        console.warn(`Error loading http://localhost/T/Face-Recognition-Attendance-System-main/resources/labels/${label}/${i}.png: ${error.message}`);
+                    }
+                }
+                if (descriptions.length > 0) {
+                    labeledDescriptors.push(new faceapi.LabeledFaceDescriptors(label, descriptions));
+                }
+            }
+            return labeledDescriptors;
+        }
+
+        function markAttendance(detectedFaces) {
+            const currentTime = new Date().toLocaleTimeString();
+            $('#studentTableContainer tr').each(function(index) {
+                if (index === 0) return;
+                const registrationNumber = $(this).find('td').eq(0).text().trim();
+                if (detectedFaces.includes(registrationNumber)) {
+                    $(this).find('.attendance-status').text('Present').addClass('present');
+                    $(this).find('.attendance-time').text(currentTime);
+                    markedStudents.set(registrationNumber, currentTime);
+                }
+            });
+        }
+
+        // End Attendance
+        $('#endAttendance').click(function() {
+            if (!window.labels || window.labels.length === 0) {
+                showAlert('No students loaded. Please select course, unit, and venue.', 'warning');
+                return;
+            }
+            const attendanceData = [];
+            $('#studentTableContainer tr').each(function(index) {
+                if (index === 0) return;
+                const studentID = $(this).find('td').eq(0).text().trim();
+                const course = $(this).find('td').eq(2).text().trim();
+                const unit = $(this).find('td').eq(3).text().trim();
+                const attendanceStatus = $(this).find('.attendance-status').text().trim();
+                const timeMarked = $(this).find('.attendance-time').text().trim() === '-' ? null : $(this).find('.attendance-time').text().trim();
+                if (attendanceStatus === 'Present') {
+                    attendanceData.push({ studentID, course, unit, attendanceStatus, timeMarked });
+                }
+            });
+
+            if (attendanceData.length === 0) {
+                showAlert('No students marked as present. Please capture attendance before ending the session.', 'warning');
+                return;
+            }
+
+            $.ajax({
+                url: 'attendance.php?request=save_attendance',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(attendanceData),
+                dataType: 'json',
+                timeout: AJAX_TIMEOUT,
+                beforeSend: function() {
+                    Swal.fire({
+                        title: 'Saving Attendance...',
+                        didOpen: () => Swal.showLoading(),
+                        allowOutsideClick: false,
+                        position: 'center'
+                    });
+                },
+                success: function(response) {
+                    Swal.close();
+                    showAlert(response.message, response.status);
+                    if (response.status === 'success') {
+                        $('#studentTableContainer').empty();
+                        $('#courseSelect, #unitSelect, #venueSelect').val('');
+                        $('#endAttendance').addClass('hidden');
+                        $('#startAttendance').removeClass('hidden');
+                        attendanceStarted = false;
+                        markedStudents.clear();
+                        stopWebcam();
+                    }
+                },
+                error: function(xhr, status, error) {
+                    Swal.close();
+                    showAlert('Error saving attendance: ' + error, 'error');
+                    console.error('save_attendance error:', xhr.responseText);
+                }
+            });
+        });
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Admin {
+  id        Int      @id @default(autoincrement())
+  firstName String
+  lastName  String   @default("")
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+}
+
+model Faculty {
+  id             Int        @id @default(autoincrement())
+  facultyName    String
+  facultyCode    String     @unique
+  createdAt      DateTime   @default(now())
+  courses        Course[]
+  venues         Venue[]
+  lecturers      Lecturer[]
+}
+
+model Course {
+  id          Int       @id @default(autoincrement())
+  name        String
+  courseCode  String    @unique
+  facultyId   Int
+  faculty     Faculty   @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+  units       Unit[]
+  students    Student[]
+  createdAt   DateTime  @default(now())
+}
+
+model Unit {
+  id                  Int            @id @default(autoincrement())
+  name                String
+  unitCode            String         @unique
+  courseId            Int
+  course              Course         @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lecturerAssignments LecturerUnit[]
+  studentAssignments  StudentUnit[]
+  attendances         Attendance[]
+  createdAt           DateTime       @default(now())
+}
+
+model Venue {
+  id             Int      @id @default(autoincrement())
+  className      String   @unique
+  facultyCode    String?
+  facultyId      Int?
+  faculty        Faculty? @relation(fields: [facultyId], references: [id], onDelete: SetNull)
+  currentStatus  String   @default("available")
+  capacity       Int      @default(50)
+  classification String   @default("Lecture Theatre")
+  createdAt      DateTime @default(now())
+}
+
+model Lecturer {
+  id              Int            @id @default(autoincrement())
+  firstName       String
+  lastName        String
+  email           String         @unique
+  password        String
+  phoneNo         String?
+  facultyCode     String?
+  facultyId       Int?
+  faculty         Faculty?       @relation(fields: [facultyId], references: [id], onDelete: SetNull)
+  unitAssignments LecturerUnit[]
+  createdAt       DateTime       @default(now())
+}
+
+model Student {
+  id                 Int           @id @default(autoincrement())
+  firstName          String
+  lastName           String
+  registrationNumber String        @unique
+  email              String        @unique
+  faculty            String
+  courseCode         String
+  courseId           Int?
+  course             Course?       @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  studentImage       String?       // Primary photo (DataURL or URL)
+  faceDescriptors    String?       // JSON-encoded array of 128-d float embedding vectors
+  unitAssignments    StudentUnit[]
+  attendances        Attendance[]
+  createdAt          DateTime      @default(now())
+}
+
+model LecturerUnit {
+  id           Int      @id @default(autoincrement())
+  lecturerId   Int
+  lecturer     Lecturer @relation(fields: [lecturerId], references: [id], onDelete: Cascade)
+  unitId       Int
+  unit         Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  dateAssigned DateTime @default(now())
+
+  @@unique([lecturerId, unitId])
+}
+
+model StudentUnit {
+  id           Int      @id @default(autoincrement())
+  studentId    Int
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  unitId       Int
+  unit         Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  dateAssigned DateTime @default(now())
+
+  @@unique([studentId, unitId])
+}
+
+model Attendance {
+  id                        Int      @id @default(autoincrement())
+  studentRegistrationNumber String
+  studentId                 Int?
+  student                   Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courseCode                String
+  unitCode                  String
+  unitId                    Int?
+  unit                      Unit?    @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  venue                     String?
+  attendanceStatus          String   @default("Present")
+  timeMarked                String?
+  dateMarked                DateTime @default(now())
+
+  @@index([studentRegistrationNumber, unitCode, dateMarked])
+}
+
+model NotificationLog {
+  id        Int      @id @default(autoincrement())
+  recipient String
+  subject   String
+  message   String
+  status    String   @default("sent")
+  createdAt DateTime @default(now())
+}
