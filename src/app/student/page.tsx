@@ -108,17 +108,17 @@ export default function StudentDashboardPage() {
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <GraduationCap className="w-8 h-8 text-buk-gold" />
+                <GraduationCap className="w-8 h-8 text-white" />
               )}
             </div>
             <div>
-              <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-buk-gold/20 border border-buk-gold/40 text-[10px] font-bold text-buk-gold-light uppercase tracking-wider mb-1">
+              <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-white/10 border border-white/20 text-[10px] font-bold text-white uppercase tracking-wider mb-1">
                 <span>{student.faculty}</span>
                 <span>&bull;</span>
                 <span>{student.courseCode}</span>
               </div>
-              <h2 className="text-xl sm:text-2xl font-black tracking-tight">{student.name}</h2>
-              <p className="text-xs text-slate-300 font-mono mt-0.5">
+              <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white">{student.name}</h2>
+              <p className="text-xs text-white/90 font-mono mt-0.5">
                 Registration No: <span className="text-white font-bold">{student.registrationNumber}</span>
               </p>
             </div>

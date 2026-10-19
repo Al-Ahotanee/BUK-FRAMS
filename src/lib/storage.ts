@@ -8,14 +8,14 @@ import path from 'path';
  * Includes automatic graceful local fallback if cloud credentials are not supplied.
  */
 
-const bucketName = process.env.S3_BUCKET_NAME || process.env.AWS_S3_BUCKET || '';
-const region = process.env.S3_REGION || process.env.AWS_REGION || 'us-east-1';
-const accessKeyId = process.env.S3_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID || '';
-const secretAccessKey = process.env.S3_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY || '';
-const endpoint = process.env.S3_ENDPOINT || undefined; // e.g., https://<account_id>.r2.cloudflarestorage.com
+const endpoint = process.env.AWS_ENDPOINT_URL_S3 || process.env.S3_ENDPOINT || undefined;
+const accessKeyId = process.env.AWS_ACCESS_KEY_ID || process.env.S3_ACCESS_KEY_ID || '';
+const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY || process.env.S3_SECRET_ACCESS_KEY || '';
+const region = process.env.AWS_REGION || process.env.S3_REGION || 'us-east-2';
+const bucketName = process.env.AWS_S3_BUCKET || process.env.S3_BUCKET_NAME || process.env.AWS_BUCKET_NAME || 'buk-attendance-storage';
 const publicDomain = process.env.S3_PUBLIC_DOMAIN || undefined;
 
-const hasCloudStorage = Boolean(bucketName && accessKeyId && secretAccessKey);
+const hasCloudStorage = Boolean(accessKeyId && secretAccessKey);
 
 let s3Client: S3Client | null = null;
 if (hasCloudStorage) {

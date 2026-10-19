@@ -81,19 +81,19 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       >
         <div className="flex flex-col h-full">
           {/* Logo & Student Identity Header */}
-          <div className="p-5 border-b border-buk-gold/30">
+          <div className="p-5 border-b border-white/20">
             <BukLogo lightText size="md" />
 
-            <div className="mt-4 p-3 rounded-xl bg-buk-navy-light/90 border border-buk-gold/30">
+            <div className="mt-4 p-3 rounded-xl bg-white/10 border border-white/20">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-lg bg-buk-gold/20 border border-buk-gold/50 flex items-center justify-center text-buk-gold">
-                  <GraduationCap className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-lg bg-white/20 flex items-center justify-center text-white">
+                  <GraduationCap className="w-5 h-5 text-white" />
                 </div>
                 <div className="overflow-hidden">
                   <p className="text-xs font-bold text-white truncate">
                     {student?.name || 'Student Portal'}
                   </p>
-                  <p className="text-[10px] text-buk-gold font-mono truncate">
+                  <p className="text-[10px] text-white/90 font-mono truncate">
                     {student?.regNo || 'CST/21/COM/00101'}
                   </p>
                 </div>
@@ -114,10 +114,10 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
                   className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all ${
                     active
                       ? 'bg-buk-gold text-buk-navy shadow-md font-bold'
-                      : 'text-slate-300 hover:text-white hover:bg-white/10'
+                      : 'text-white/90 hover:text-white hover:bg-white/10'
                   }`}
                 >
-                  <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-buk-navy' : 'text-buk-gold'}`} />
+                  <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-buk-navy' : 'text-white'}`} />
                   <span>{item.name}</span>
                 </Link>
               );
@@ -125,20 +125,20 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
           </nav>
 
           {/* Academic Session & Sign Out Footer */}
-          <div className="p-4 border-t border-buk-gold/30 bg-buk-navy-dark/80">
+          <div className="p-4 border-t border-white/20 bg-buk-navy-dark/80">
             <div className="flex items-center justify-between">
               <div className="flex flex-col">
-                <span className="text-[10px] font-semibold text-buk-gold-light uppercase tracking-wider">
+                <span className="text-[10px] font-semibold text-white/80 uppercase tracking-wider">
                   Session 2025/2026
                 </span>
-                <span className="text-[11px] text-slate-300">First Semester</span>
+                <span className="text-[11px] text-white">First Semester</span>
               </div>
               <button
                 onClick={handleLogout}
                 title="Sign Out"
-                className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-white/10 transition-colors"
+                className="p-2 rounded-lg text-white/80 hover:text-red-400 hover:bg-white/10 transition-colors"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-4 h-4 text-white hover:text-red-400" />
               </button>
             </div>
           </div>

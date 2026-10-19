@@ -31,13 +31,13 @@ export default function LecturerDashboardPage() {
       <div className="bg-gradient-to-r from-buk-navy via-buk-navy-light to-slate-900 rounded-3xl p-6 sm:p-8 text-white border-2 border-buk-gold/60 shadow-lg relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
           <div>
-            <span className="text-xs font-bold text-buk-gold uppercase tracking-wider">
-              Teaching Faculty Portal
-            </span>
-            <h2 className="text-2xl sm:text-3xl font-extrabold mt-1">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/20 text-xs font-bold text-white uppercase tracking-wider">
+              <span>Teaching Faculty Portal</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-extrabold mt-2 text-white">
               Welcome back, Dr. Mark Ibrahim
             </h2>
-            <p className="text-xs sm:text-sm text-slate-300 mt-1 max-w-xl">
+            <p className="text-xs sm:text-sm text-white/90 mt-1 max-w-xl">
               Conduct live biometric face attendance for your assigned course units, monitor attendance compliance, and export reports.
             </p>
           </div>

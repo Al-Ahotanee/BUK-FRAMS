@@ -90,10 +90,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       >
         <div className="flex flex-col h-full">
           {/* Logo Area */}
-          <div className="p-5 border-b border-buk-gold/30">
+          <div className="p-5 border-b border-white/20">
             <BukLogo lightText size="md" />
-            <div className="mt-3 px-2.5 py-1 rounded-lg bg-buk-gold/15 border border-buk-gold/30 inline-flex items-center gap-1.5 text-[11px] font-bold text-buk-gold-light">
-              <ShieldAlert className="w-3.5 h-3.5" />
+            <div className="mt-3 px-2.5 py-1 rounded-lg bg-white/10 border border-white/20 inline-flex items-center gap-1.5 text-[11px] font-bold text-white">
+              <ShieldAlert className="w-3.5 h-3.5 text-white" />
               <span>Institutional Control Room</span>
             </div>
           </div>
@@ -102,7 +102,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
             {navSections.map((section) => (
               <div key={section.title} className="space-y-1">
-                <p className="px-3 text-[10px] font-bold text-buk-gold-light uppercase tracking-wider">
+                <p className="px-3 text-[10px] font-bold text-white/80 uppercase tracking-wider">
                   {section.title}
                 </p>
                 {section.items.map((item) => {
@@ -116,10 +116,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                       className={`flex items-center gap-3 px-3 py-2 rounded-xl text-xs font-semibold transition-all ${
                         active
                           ? 'bg-buk-gold text-buk-navy shadow-sm font-bold'
-                          : 'text-slate-300 hover:text-white hover:bg-white/10'
+                          : 'text-white/90 hover:text-white hover:bg-white/10'
                       }`}
                     >
-                      <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-buk-navy' : 'text-buk-gold'}`} />
+                      <Icon className={`w-4 h-4 shrink-0 ${active ? 'text-buk-navy' : 'text-white'}`} />
                       <span>{item.name}</span>
                     </Link>
                   );
@@ -129,18 +129,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </nav>
 
           {/* User & Logout Footer */}
-          <div className="p-4 border-t border-buk-gold/30 bg-buk-navy-dark/80">
+          <div className="p-4 border-t border-white/20 bg-buk-navy-dark/80">
             <div className="flex items-center justify-between">
               <div className="flex flex-col">
                 <span className="text-xs font-bold text-white">Administrator</span>
-                <span className="text-[10px] text-slate-400">admin@buk.edu.ng</span>
+                <span className="text-[10px] text-white/80">admin@buk.edu.ng</span>
               </div>
               <button
                 onClick={handleLogout}
                 title="Sign Out"
-                className="p-2 rounded-lg text-slate-400 hover:text-red-400 hover:bg-white/10 transition-colors"
+                className="p-2 rounded-lg text-white/80 hover:text-red-400 hover:bg-white/10 transition-colors"
               >
-                <LogOut className="w-4 h-4" />
+                <LogOut className="w-4 h-4 text-white hover:text-red-400" />
               </button>
             </div>
           </div>

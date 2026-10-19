@@ -37,14 +37,11 @@ export function BukLogo({
       {showText && (
         <div className="flex flex-col">
           <div className="flex items-center gap-1.5">
-            <span className={`font-bold tracking-tight text-lg leading-tight ${lightText ? 'text-white' : 'text-buk-navy'}`}>
-              BAYERO UNIVERSITY
-            </span>
-            <span className="font-extrabold text-lg text-buk-gold leading-tight">
-              KANO
+            <span className={`font-bold tracking-tight text-lg leading-tight ${lightText ? 'text-white' : 'text-slate-900'}`}>
+              BAYERO UNIVERSITY KANO
             </span>
           </div>
-          <span className={`text-[10px] tracking-wider font-medium uppercase ${lightText ? 'text-buk-gold-light' : 'text-slate-500'}`}>
+          <span className={`text-[10px] tracking-wider font-medium uppercase ${lightText ? 'text-white/80' : 'text-slate-500'}`}>
             Facial Recognition Attendance System
           </span>
         </div>

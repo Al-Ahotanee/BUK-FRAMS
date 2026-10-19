@@ -65,17 +65,17 @@ export default function HomePage() {
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-12 gap-12 items-center">
           <div className="lg:col-span-7 space-y-6 text-center lg:text-left">
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-buk-gold/15 border border-buk-gold/40 text-buk-gold-light text-xs font-semibold uppercase tracking-wider">
-              <Sparkles className="w-4 h-4" />
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 border border-white/20 text-white text-xs font-semibold uppercase tracking-wider">
+              <Sparkles className="w-4 h-4 text-white" />
               <span>Next-Gen Academic Verification</span>
             </div>
 
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-tight">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight leading-tight text-white">
               Facial Recognition <br />
-              <span className="text-buk-gold">Attendance System</span>
+              Attendance System
             </h1>
 
-            <p className="text-base sm:text-lg text-slate-300 max-w-2xl leading-relaxed">
+            <p className="text-base sm:text-lg text-slate-200 max-w-2xl leading-relaxed">
               Empowering Bayero University Kano with automated biometric attendance tracking.
               Powered by deep convolutional neural networks for instantaneous face detection,
               foolproof proxy prevention, and comprehensive compliance analytics.
@@ -86,7 +86,7 @@ export default function HomePage() {
                 href="/login?role=student"
                 className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3.5 rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2.5 text-sm"
               >
-                <GraduationCap className="w-5 h-5 text-emerald-200" />
+                <GraduationCap className="w-5 h-5 text-white" />
                 <span>Student Portal</span>
               </Link>
               <Link
@@ -100,7 +100,7 @@ export default function HomePage() {
                 href="/login?role=admin"
                 className="bg-white/10 hover:bg-white/15 text-white border border-white/20 font-semibold px-6 py-3.5 rounded-xl transition-all flex items-center justify-center gap-2.5 text-sm"
               >
-                <ShieldCheck className="w-5 h-5 text-buk-gold" />
+                <ShieldCheck className="w-5 h-5 text-white" />
                 <span>Admin Suite</span>
               </Link>
             </div>
@@ -108,16 +108,16 @@ export default function HomePage() {
             {/* Micro stats banner */}
             <div className="pt-8 grid grid-cols-3 gap-4 border-t border-white/10">
               <div>
-                <p className="text-2xl lg:text-3xl font-extrabold text-buk-gold">99.4%</p>
-                <p className="text-xs text-slate-400">Match Accuracy</p>
+                <p className="text-2xl lg:text-3xl font-extrabold text-white">99.4%</p>
+                <p className="text-xs text-slate-300">Match Accuracy</p>
               </div>
               <div>
                 <p className="text-2xl lg:text-3xl font-extrabold text-white">&lt; 300ms</p>
-                <p className="text-xs text-slate-400">Recognition Latency</p>
+                <p className="text-xs text-slate-300">Recognition Latency</p>
               </div>
               <div>
-                <p className="text-2xl lg:text-3xl font-extrabold text-buk-green-light">Zero</p>
-                <p className="text-xs text-slate-400">Proxy Attendance</p>
+                <p className="text-2xl lg:text-3xl font-extrabold text-white">Zero</p>
+                <p className="text-xs text-slate-300">Proxy Attendance</p>
               </div>
             </div>
           </div>
