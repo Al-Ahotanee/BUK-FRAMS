@@ -11,8 +11,13 @@ import {
   Loader2, 
   RotateCcw, 
   Sparkles,
-  ShieldCheck
+  ShieldCheck,
+  FlipHorizontal,
+  Volume2,
+  VolumeX,
+  UserCheck
 } from 'lucide-react';
+import { playSampleChime, playErrorBuzz, playSuccessChime, isSoundMuted, setSoundMuted } from '@/lib/audio';
 
 declare const faceapi: any;
 
@@ -34,12 +39,25 @@ export default function StudentEnrollPage() {
   const [cameraActive, setCameraActive] = useState(false);
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [capturing, setCapturing] = useState(false);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [soundEnabled, setSoundEnabled] = useState(true);
   const [capturedSamples, setCapturedSamples] = useState<Array<{ image: string; descriptor: number[] }>>([]);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'info' | 'success' | 'danger' }>({
     text: 'Initializing Face Recognition Engine...',
     type: 'info',
   });
   const [submitting, setSubmitting] = useState(false);
+
+  // Audio preference
+  useEffect(() => {
+    setSoundEnabled(!isSoundMuted());
+  }, []);
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    setSoundMuted(!next);
+  };
 
   // Load BUK metadata
   useEffect(() => {
@@ -103,12 +121,23 @@ export default function StudentEnrollPage() {
   }, []);
 
   // Start webcam
-  const startWebcam = async () => {
+  const startWebcam = async (overrideFacing?: 'user' | 'environment') => {
+    const facing = overrideFacing || facingMode;
     try {
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach((track) => track.stop());
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
+        video: { 
+          width: { ideal: 1280 }, 
+          height: { ideal: 720 }, 
+          facingMode: facing 
+        },
         audio: false,
       });
+
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.play();
@@ -128,6 +157,14 @@ export default function StudentEnrollPage() {
       videoRef.current.srcObject = null;
     }
     setCameraActive(false);
+  };
+
+  const handleToggleCamera = async () => {
+    const next = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(next);
+    if (cameraActive) {
+      await startWebcam(next);
+    }
   };
 
   // Capture face snapshot & compute 128-d descriptor
@@ -155,6 +192,7 @@ export default function StudentEnrollPage() {
         .withFaceDescriptor();
 
       if (!detection) {
+        playErrorBuzz();
         setStatusMessage({
           text: 'No face detected in frame. Please face the camera directly in good lighting.',
           type: 'danger',
@@ -173,11 +211,13 @@ export default function StudentEnrollPage() {
       setCapturedSamples(newSamples);
 
       if (newSamples.length < 5) {
+        playSampleChime();
         setStatusMessage({
           text: `Sample ${newSamples.length} of 5 captured successfully! Take next angle.`,
           type: 'success',
         });
       } else {
+        playSuccessChime();
         setStatusMessage({
           text: 'All 5 facial angles captured! Ready to complete enrollment.',
           type: 'success',
@@ -185,6 +225,7 @@ export default function StudentEnrollPage() {
       }
     } catch (err: any) {
       console.error('Capture error:', err);
+      playErrorBuzz();
       setStatusMessage({ text: 'Capture error: ' + err.message, type: 'danger' });
     } finally {
       setCapturing(false);
@@ -255,9 +296,12 @@ export default function StudentEnrollPage() {
           <ArrowLeft className="w-4 h-4" />
         </Link>
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900">Biometric Face Enrollment</h2>
+          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+            <Camera className="w-5 h-5 text-buk-navy" />
+            <span>Biometric Face Enrollment Terminal</span>
+          </h2>
           <p className="text-xs text-slate-500">
-            Guided 5-angle neural vector extraction for Bayero University students
+            Guided 5-angle neural vector extraction for Bayero University Kano students
           </p>
         </div>
       </div>
@@ -326,7 +370,7 @@ export default function StudentEnrollPage() {
                 value={facultyId}
                 onChange={(e) => setFacultyId(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-buk-navy focus:outline-none bg-white"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-buk-navy focus:outline-none bg-white text-slate-800"
               >
                 <option value="">Select Faculty</option>
                 {faculties.map((f) => (
@@ -343,7 +387,7 @@ export default function StudentEnrollPage() {
                 value={courseId}
                 onChange={(e) => setCourseId(e.target.value)}
                 required
-                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-buk-navy focus:outline-none bg-white"
+                className="w-full px-3 py-2 rounded-xl border border-slate-300 focus:ring-2 focus:ring-buk-navy focus:outline-none bg-white text-slate-800"
               >
                 <option value="">Select Programme</option>
                 {courses.map((c) => (
@@ -362,12 +406,12 @@ export default function StudentEnrollPage() {
               >
                 {submitting ? (
                   <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <Loader2 className="w-4 h-4 animate-spin text-buk-navy" />
                     <span>Registering Biometric Profile...</span>
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 className="w-4 h-4" />
+                    <CheckCircle2 className="w-4 h-4 text-buk-navy" />
                     <span>Complete Enrollment ({capturedSamples.length}/5 Captured)</span>
                   </>
                 )}
@@ -379,52 +423,82 @@ export default function StudentEnrollPage() {
         {/* Right: Live Camera & Vector Extraction Terminal */}
         <div className="lg:col-span-7 space-y-4">
           <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
               <div className="flex items-center gap-2">
                 <Camera className="w-4 h-4 text-buk-navy" />
                 <h3 className="text-sm font-bold text-slate-900">Live Face Scanner</h3>
               </div>
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600">
-                128-D CNN Embeddings
-              </span>
+              <div className="flex items-center gap-2">
+                {/* Sound Toggle */}
+                <button
+                  type="button"
+                  onClick={toggleSound}
+                  className={`p-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
+                    soundEnabled 
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
+                      : 'bg-slate-100 border-slate-300 text-slate-500'
+                  }`}
+                  title={soundEnabled ? 'Sound ON' : 'Muted'}
+                >
+                  {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-700" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
+                  <span className="text-[11px] font-bold">{soundEnabled ? 'Sound ON' : 'Muted'}</span>
+                </button>
+
+                {/* Switch Front/Rear */}
+                <button
+                  type="button"
+                  onClick={handleToggleCamera}
+                  className="p-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center gap-1.5"
+                  title="Switch Front / Rear Camera"
+                >
+                  <FlipHorizontal className="w-4 h-4 text-slate-700" />
+                  <span className="text-[11px] font-bold">{facingMode === 'user' ? 'Front' : 'Rear'}</span>
+                </button>
+
+                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600">
+                  128-D CNN
+                </span>
+              </div>
             </div>
 
             {/* Status Alert Banner */}
             <div
               className={`mb-4 p-3 rounded-2xl text-xs flex items-center gap-2.5 ${
                 statusMessage.type === 'success'
-                  ? 'bg-green-50 text-green-800 border border-green-200'
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                   : statusMessage.type === 'danger'
-                  ? 'bg-red-50 text-red-800 border border-red-200'
+                  ? 'bg-rose-50 text-rose-800 border border-rose-200'
                   : 'bg-blue-50 text-blue-800 border border-blue-200'
               }`}
             >
               {statusMessage.type === 'success' ? (
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
               ) : statusMessage.type === 'danger' ? (
-                <AlertCircle className="w-4 h-4 shrink-0" />
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
               ) : (
-                <Sparkles className="w-4 h-4 shrink-0" />
+                <Sparkles className="w-4 h-4 shrink-0 text-blue-600" />
               )}
-              <span className="font-medium">{statusMessage.text}</span>
+              <span className="font-semibold">{statusMessage.text}</span>
             </div>
 
-            {/* Video Feed Box */}
-            <div className="relative rounded-2xl overflow-hidden bg-slate-900 aspect-video flex items-center justify-center border-2 border-slate-800">
+            {/* Large Responsive Viewfinder Box */}
+            <div className="relative rounded-2xl overflow-hidden bg-slate-950 min-h-[340px] sm:min-h-[420px] flex items-center justify-center border-2 border-slate-800 shadow-inner">
               <video
                 ref={videoRef}
                 autoPlay
                 muted
                 playsInline
-                className={`w-full h-full object-cover ${cameraActive ? 'block' : 'hidden'}`}
+                className={`w-full h-full object-cover min-h-[340px] sm:min-h-[420px] ${cameraActive ? 'block' : 'hidden'}`}
               />
 
               {!cameraActive && (
-                <div className="text-center p-6 text-slate-400">
-                  <Camera className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                  <p className="text-xs font-semibold">Camera is currently inactive</p>
-                  <p className="text-[10px] mt-1 text-slate-500">
-                    Click Start Camera below to begin taking enrollment samples
+                <div className="text-center p-8 text-slate-400 max-w-sm">
+                  <div className="w-16 h-16 rounded-full bg-slate-900 border-2 border-buk-gold/50 flex items-center justify-center mx-auto mb-3 shadow-lg">
+                    <Camera className="w-8 h-8 text-buk-gold" />
+                  </div>
+                  <h4 className="text-sm font-bold text-white">Enrollment Camera Standby</h4>
+                  <p className="text-xs text-slate-300 mt-1">
+                    Click <strong className="text-buk-gold font-bold">Start Camera</strong> below to begin capturing biometric face angles.
                   </p>
                 </div>
               )}
@@ -432,9 +506,12 @@ export default function StudentEnrollPage() {
               {/* Face Guide Target Overlay */}
               {cameraActive && (
                 <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-                  <div className="w-48 h-64 border-2 border-dashed border-buk-gold/70 rounded-full flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-white/80 bg-black/40 px-2 py-0.5 rounded">
-                      Align Face Here
+                  <div className="w-56 h-72 sm:w-64 sm:h-80 border-2 border-dashed border-buk-gold/80 rounded-[80px] shadow-[0_0_30px_rgba(202,138,4,0.25)] flex flex-col items-center justify-between p-4">
+                    <span className="text-[10px] font-black text-white bg-black/60 px-2.5 py-0.5 rounded-full backdrop-blur-sm border border-white/20">
+                      POSITION FACE HERE
+                    </span>
+                    <span className="text-[10px] font-bold text-white bg-black/60 px-2.5 py-0.5 rounded-full backdrop-blur-sm border border-white/20">
+                      SAMPLES: {capturedSamples.length} / 5
                     </span>
                   </div>
                 </div>
@@ -447,7 +524,7 @@ export default function StudentEnrollPage() {
                 {!cameraActive ? (
                   <button
                     type="button"
-                    onClick={startWebcam}
+                    onClick={() => startWebcam()}
                     disabled={!modelsLoaded}
                     className="px-4 py-2 rounded-xl text-xs font-bold bg-buk-navy text-white hover:bg-buk-navy-light transition-colors disabled:opacity-50"
                   >
@@ -472,7 +549,7 @@ export default function StudentEnrollPage() {
                   {capturing ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Extracting...</span>
+                      <span>Extracting Vector...</span>
                     </>
                   ) : (
                     <>
@@ -487,7 +564,7 @@ export default function StudentEnrollPage() {
                 <button
                   type="button"
                   onClick={handleResetSamples}
-                  className="text-xs text-red-600 hover:text-red-700 font-semibold inline-flex items-center gap-1"
+                  className="text-xs text-rose-600 hover:text-rose-700 font-semibold inline-flex items-center gap-1"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Reset Samples</span>
@@ -500,7 +577,7 @@ export default function StudentEnrollPage() {
           <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm">
             <h4 className="text-xs font-bold text-slate-900 mb-3 flex items-center justify-between">
               <span>Captured Biometric Angle Samples</span>
-              <span className="text-[10px] text-slate-400">Minimum 1 sample required (5 recommended)</span>
+              <span className="text-[10px] text-slate-500 font-semibold">1 minimum required (5 recommended for peak accuracy)</span>
             </h4>
 
             <div className="grid grid-cols-5 gap-3">
@@ -509,7 +586,9 @@ export default function StudentEnrollPage() {
                 return (
                   <div
                     key={index}
-                    className="aspect-square rounded-xl bg-slate-100 border border-slate-200 overflow-hidden relative flex items-center justify-center"
+                    className={`aspect-square rounded-2xl overflow-hidden relative flex items-center justify-center border-2 ${
+                      sample ? 'border-emerald-500 bg-emerald-50' : 'border-dashed border-slate-200 bg-slate-50'
+                    }`}
                   >
                     {sample ? (
                       <>
@@ -518,8 +597,8 @@ export default function StudentEnrollPage() {
                           alt={`Sample ${index + 1}`}
                           className="w-full h-full object-cover"
                         />
-                        <span className="absolute bottom-1 right-1 bg-buk-green text-white p-0.5 rounded-full">
-                          <CheckCircle2 className="w-3 h-3" />
+                        <span className="absolute bottom-1 right-1 bg-emerald-600 text-white p-0.5 rounded-full shadow-sm">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-white" />
                         </span>
                       </>
                     ) : (

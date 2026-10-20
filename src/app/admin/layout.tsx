@@ -23,6 +23,7 @@ import {
   Search,
   Bell,
   Sparkles,
+  BarChart3,
 } from 'lucide-react';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -35,6 +36,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       title: 'Core Control',
       items: [
         { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+        { name: 'Analytics & Reports', href: '/admin/analytics', icon: BarChart3 },
       ],
     },
     {

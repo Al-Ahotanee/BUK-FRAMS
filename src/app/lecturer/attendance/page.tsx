@@ -6,6 +6,8 @@ import {
   Camera, 
   CheckCircle2, 
   AlertCircle, 
+  AlertTriangle,
+  XCircle,
   Users, 
   MapPin, 
   BookOpen, 
@@ -14,9 +16,21 @@ import {
   Square, 
   Save, 
   Volume2, 
+  VolumeX,
+  Maximize2,
+  Minimize2,
+  FlipHorizontal,
   Sparkles,
-  ShieldAlert
+  ShieldAlert,
+  ArrowRight
 } from 'lucide-react';
+import { 
+  playSuccessChime, 
+  playAlreadyMarkedTone, 
+  playErrorBuzz, 
+  isSoundMuted, 
+  setSoundMuted 
+} from '@/lib/audio';
 
 declare const faceapi: any;
 
@@ -32,6 +46,13 @@ interface EnrolledStudent {
   hasFaceEnrolled: boolean;
   status: 'Absent' | 'Present';
   timeMarked?: string;
+}
+
+interface HudFeedback {
+  type: 'success' | 'already' | 'unknown';
+  title: string;
+  subtitle: string;
+  timestamp: number;
 }
 
 function AttendanceScannerContent() {
@@ -51,14 +72,34 @@ function AttendanceScannerContent() {
   const [modelsReady, setModelsReady] = useState(false);
   const [faceMatcher, setFaceMatcher] = useState<any>(null);
 
-  // Live Camera & Recognition Loop
+  // Camera settings
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isScanning, setIsScanning] = useState(false);
   const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const [lastRecognized, setLastRecognized] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [isKioskMode, setIsKioskMode] = useState(false);
+  const [soundEnabled, setSoundEnabled] = useState(true);
+
+  // Feedback HUD & Debouncing
+  const [hudNotice, setHudNotice] = useState<HudFeedback | null>(null);
+  const lastChimeRef = useRef<{ [key: string]: number }>({});
+  const studentsRef = useRef<EnrolledStudent[]>([]);
+  studentsRef.current = students;
+
   const [savingAttendance, setSavingAttendance] = useState(false);
   const [sessionSuccess, setSessionSuccess] = useState<string | null>(null);
+
+  // Sound preference init
+  useEffect(() => {
+    setSoundEnabled(!isSoundMuted());
+  }, []);
+
+  const toggleSound = () => {
+    const next = !soundEnabled;
+    setSoundEnabled(next);
+    setSoundMuted(!next);
+  };
 
   // Load lecturer's courses and venues
   useEffect(() => {
@@ -126,6 +167,7 @@ function AttendanceScannerContent() {
     if (!selectedUnit) return;
     setLoadingStudents(true);
     setSessionSuccess(null);
+    setHudNotice(null);
 
     try {
       const res = await fetch(`/api/lecturer/students?unitCode=${encodeURIComponent(selectedUnit)}`);
@@ -139,7 +181,6 @@ function AttendanceScannerContent() {
         setStudents(list);
         setStudentsLoaded(true);
 
-        // Build FaceMatcher from stored 128-d vector embeddings
         if (typeof faceapi !== 'undefined') {
           const labeledDescriptors: any[] = [];
 
@@ -169,15 +210,27 @@ function AttendanceScannerContent() {
   };
 
   // Start Webcam and Recognition Loop
-  const startScanning = async () => {
+  const startScanning = async (overrideFacing?: 'user' | 'environment') => {
     if (!selectedVenue) {
       alert('Please specify the Lecture Venue / Theatre before scanning.');
       return;
     }
 
+    const currentFacing = overrideFacing || facingMode;
+
     try {
+      // Stop any existing stream first
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach((t) => t.stop());
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: 640, height: 480, facingMode: 'user' },
+        video: { 
+          width: { ideal: 1280 }, 
+          height: { ideal: 720 }, 
+          facingMode: currentFacing 
+        },
         audio: false,
       });
 
@@ -189,14 +242,18 @@ function AttendanceScannerContent() {
       setIsScanning(true);
       setSessionSuccess(null);
 
-      // Start recognition loop
+      if (scanIntervalRef.current) {
+        clearInterval(scanIntervalRef.current);
+      }
+
+      // Recognition loop running every 650ms
       scanIntervalRef.current = setInterval(async () => {
         if (!videoRef.current || !canvasRef.current || !faceMatcher) return;
 
         const video = videoRef.current;
         const canvas = canvasRef.current;
 
-        if (video.paused || video.ended) return;
+        if (video.paused || video.ended || video.readyState < 2) return;
 
         const displaySize = { width: video.videoWidth || 640, height: video.videoHeight || 480 };
         faceapi.matchDimensions(canvas, displaySize);
@@ -211,39 +268,87 @@ function AttendanceScannerContent() {
           const ctx = canvas.getContext('2d');
           if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+          if (resizedDetections.length === 0) {
+            return;
+          }
+
           const results = resizedDetections.map((d: any) => faceMatcher.findBestMatch(d.descriptor));
 
           results.forEach((result: any, i: number) => {
             const box = resizedDetections[i].detection.box;
             const isMatch = result.label !== 'unknown';
-            const labelText = isMatch ? result.label : 'Unrecognized Student';
+            const regNo = result.label;
+            const now = Date.now();
 
-            // Draw bounding box
+            // Draw clean bounding box
             const drawBox = new faceapi.draw.DrawBox(box, {
-              label: labelText,
-              boxColor: isMatch ? '#006837' : '#EF4444',
+              label: isMatch ? regNo : 'Unrecognized Face',
+              boxColor: isMatch ? '#006837' : '#DC2626',
+              lineWidth: 3,
             });
             drawBox.draw(canvas);
 
-            // Automatically mark student as Present
             if (isMatch) {
-              const regNo = result.label;
-              setStudents((prev) =>
-                prev.map((s) => {
-                  if (s.registrationNumber === regNo && s.status !== 'Present') {
-                    const time = new Date().toLocaleTimeString();
-                    setLastRecognized(`${s.name} (${regNo})`);
-                    return { ...s, status: 'Present', timeMarked: time };
+              const currentList = studentsRef.current;
+              const matchedStudent = currentList.find((s) => s.registrationNumber === regNo);
+
+              if (matchedStudent) {
+                if (matchedStudent.status !== 'Present') {
+                  // NEW ATTENDANCE RECORDED
+                  const time = new Date().toLocaleTimeString();
+                  playSuccessChime();
+                  lastChimeRef.current[regNo] = now;
+
+                  setHudNotice({
+                    type: 'success',
+                    title: 'ATTENDANCE RECORDED',
+                    subtitle: `${matchedStudent.name} (${regNo}) marked Present at ${time}`,
+                    timestamp: now,
+                  });
+
+                  setStudents((prev) =>
+                    prev.map((s) =>
+                      s.registrationNumber === regNo
+                        ? { ...s, status: 'Present', timeMarked: time }
+                        : s
+                    )
+                  );
+                } else {
+                  // ALREADY RECORDED - DEBOUNCED WARNING
+                  const lastChimeTime = lastChimeRef.current[regNo] || 0;
+                  if (now - lastChimeTime > 7000) {
+                    playAlreadyMarkedTone();
+                    lastChimeRef.current[regNo] = now;
+
+                    setHudNotice({
+                      type: 'already',
+                      title: 'ALREADY RECORDED — PLEASE STEP ASIDE',
+                      subtitle: `${matchedStudent.name} (${regNo}) was marked at ${matchedStudent.timeMarked || 'earlier'}`,
+                      timestamp: now,
+                    });
                   }
-                  return s;
-                })
-              );
+                }
+              }
+            } else {
+              // UNRECOGNIZED FACE
+              const lastUnknownTime = lastChimeRef.current['unknown'] || 0;
+              if (now - lastUnknownTime > 6000) {
+                playErrorBuzz();
+                lastChimeRef.current['unknown'] = now;
+
+                setHudNotice({
+                  type: 'unknown',
+                  title: 'UNRECOGNIZED FACE',
+                  subtitle: 'Student face is not enrolled in BUK database. Please visit Admin for biometric registration.',
+                  timestamp: now,
+                });
+              }
             }
           });
         } catch (e) {
           console.warn('Recognition frame skip:', e);
         }
-      }, 700);
+      }, 650);
     } catch (err: any) {
       console.error('Webcam scan error:', err);
       alert('Could not start webcam scanner: ' + err.message);
@@ -265,6 +370,15 @@ function AttendanceScannerContent() {
       if (ctx) ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
     }
     setIsScanning(false);
+  };
+
+  // Toggle front/rear camera
+  const handleToggleCamera = async () => {
+    const nextFacing = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextFacing);
+    if (isScanning) {
+      await startScanning(nextFacing);
+    }
   };
 
   // Toggle present status manually
@@ -310,9 +424,10 @@ function AttendanceScannerContent() {
 
       if (data.status === 'success') {
         stopScanning();
-        const presentCount = students.filter((s) => s.status === 'Present').length;
+        if (isKioskMode) setIsKioskMode(false);
+        const presentCnt = students.filter((s) => s.status === 'Present').length;
         setSessionSuccess(
-          `Attendance successfully archived for ${selectedUnit}! (${presentCount} of ${students.length} students marked present)`
+          `Attendance successfully archived for ${selectedUnit}! (${presentCnt} of ${students.length} students marked present)`
         );
       } else {
         alert(data.message || 'Error saving attendance');
@@ -328,16 +443,26 @@ function AttendanceScannerContent() {
   const presentCount = students.filter((s) => s.status === 'Present').length;
   const attendancePercentage = students.length > 0 ? Math.round((presentCount / students.length) * 100) : 0;
 
+  // Auto-hide HUD after 5 seconds if no new event
+  useEffect(() => {
+    if (!hudNotice) return;
+    const timer = setTimeout(() => {
+      setHudNotice(null);
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [hudNotice]);
+
   return (
     <div className="space-y-6">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-xl font-extrabold text-slate-900">
-            Facial Recognition Attendance Terminal
+          <h2 className="text-xl font-extrabold text-slate-900 flex items-center gap-2">
+            <Camera className="w-5 h-5 text-buk-navy" />
+            <span>Facial Recognition Attendance Terminal</span>
           </h2>
           <p className="text-xs text-slate-500">
-            High-speed real-time biometric identity verification for Bayero University Kano
+            High-speed real-time biometric identity verification with acoustic feedback for Bayero University Kano
           </p>
         </div>
 
@@ -354,16 +479,16 @@ function AttendanceScannerContent() {
               disabled={savingAttendance}
               className="bg-buk-green hover:bg-buk-green-dark text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50"
             >
-              {savingAttendance ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              <span>Commit & Save Attendance</span>
+              {savingAttendance ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Save className="w-4 h-4 text-white" />}
+              <span className="text-white">Commit & Save Attendance</span>
             </button>
           </div>
         )}
       </div>
 
       {sessionSuccess && (
-        <div className="p-4 rounded-2xl bg-green-50 border border-green-200 text-green-900 text-xs font-semibold flex items-center gap-2.5 shadow-sm">
-          <CheckCircle2 className="w-5 h-5 text-green-700 shrink-0" />
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-semibold flex items-center gap-2.5 shadow-sm">
+          <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0" />
           <span>{sessionSuccess}</span>
         </div>
       )}
@@ -423,13 +548,13 @@ function AttendanceScannerContent() {
             >
               {loadingStudents ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Loading Roster & Vectors...</span>
+                  <Loader2 className="w-4 h-4 animate-spin text-white" />
+                  <span className="text-white">Loading Roster & Vectors...</span>
                 </>
               ) : (
                 <>
-                  <Users className="w-4 h-4" />
-                  <span>Load Enrolled Students</span>
+                  <Users className="w-4 h-4 text-white" />
+                  <span className="text-white">Load Enrolled Students ({selectedUnit || 'Select Unit'})</span>
                 </>
               )}
             </button>
@@ -439,34 +564,61 @@ function AttendanceScannerContent() {
 
       {studentsLoaded && (
         <div className="grid lg:grid-cols-12 gap-6">
-          {/* Left Column: Live Webcam Scanner */}
-          <div className="lg:col-span-6 space-y-4">
-            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm">
-              <div className="flex items-center justify-between mb-3">
+          {/* Left Column: Live Webcam Scanner Feed */}
+          <div className="lg:col-span-7 space-y-4">
+            <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+              {/* Camera Header with Sound & Lens Controls */}
+              <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                 <div className="flex items-center gap-2">
                   <Camera className="w-4 h-4 text-buk-navy" />
-                  <h3 className="text-sm font-bold text-slate-900">Webcam Scanner Feed</h3>
+                  <h3 className="text-sm font-bold text-slate-900">Live Biometric Viewfinder</h3>
                 </div>
+
                 <div className="flex items-center gap-2">
-                  <span
-                    className={`w-2.5 h-2.5 rounded-full ${
-                      isScanning ? 'bg-buk-green animate-pulse' : 'bg-slate-300'
+                  {/* Sound Mute/Unmute */}
+                  <button
+                    onClick={toggleSound}
+                    className={`p-2 rounded-xl text-xs font-semibold border transition-all flex items-center gap-1.5 ${
+                      soundEnabled 
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
+                        : 'bg-slate-100 border-slate-300 text-slate-500'
                     }`}
-                  />
-                  <span className="text-[11px] font-mono text-slate-500">
-                    {isScanning ? 'LIVE AI RECOGNITION' : 'STANDBY'}
-                  </span>
+                    title={soundEnabled ? 'Audio Alerts Enabled' : 'Audio Alerts Muted'}
+                  >
+                    {soundEnabled ? <Volume2 className="w-4 h-4 text-emerald-700" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
+                    <span className="text-[11px] font-bold">{soundEnabled ? 'Sound ON' : 'Muted'}</span>
+                  </button>
+
+                  {/* Switch Front/Rear Camera */}
+                  <button
+                    onClick={handleToggleCamera}
+                    className="p-2 rounded-xl text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-all flex items-center gap-1.5"
+                    title="Switch Front / Rear Camera"
+                  >
+                    <FlipHorizontal className="w-4 h-4 text-slate-700" />
+                    <span className="text-[11px] font-bold">{facingMode === 'user' ? 'Front' : 'Rear'}</span>
+                  </button>
+
+                  {/* Fullscreen / Kiosk Mode Button */}
+                  <button
+                    onClick={() => setIsKioskMode(true)}
+                    className="p-2 rounded-xl text-xs font-semibold bg-buk-navy hover:bg-buk-navy-light text-white transition-all flex items-center gap-1.5 shadow-sm"
+                    title="Launch Full-Screen Kiosk Viewfinder"
+                  >
+                    <Maximize2 className="w-4 h-4 text-white" />
+                    <span className="text-[11px] font-bold text-white">Full Screen Kiosk</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Video with Canvas Overlay */}
-              <div className="relative rounded-2xl overflow-hidden bg-slate-950 aspect-video flex items-center justify-center border-2 border-slate-800 shadow-inner">
+              {/* Viewfinder Container */}
+              <div className="relative rounded-2xl overflow-hidden bg-slate-950 min-h-[380px] sm:min-h-[460px] flex items-center justify-center border-2 border-slate-800 shadow-inner">
                 <video
                   ref={videoRef}
                   autoPlay
                   muted
                   playsInline
-                  className={`w-full h-full object-cover ${isScanning ? 'block' : 'hidden'}`}
+                  className={`w-full h-full object-cover min-h-[380px] sm:min-h-[460px] ${isScanning ? 'block' : 'hidden'}`}
                 />
                 <canvas
                   ref={canvasRef}
@@ -475,69 +627,154 @@ function AttendanceScannerContent() {
                   }`}
                 />
 
+                {/* Standby UI */}
                 {!isScanning && (
-                  <div className="text-center p-6 text-slate-400">
-                    <Camera className="w-12 h-12 mx-auto mb-2 opacity-50" />
-                    <p className="text-xs font-semibold">Webcam Terminal Ready</p>
-                    <p className="text-[10px] text-slate-500 mt-1 max-w-xs mx-auto">
-                      Click Start Attendance Scanner below. Students should face camera directly for automated verification.
+                  <div className="text-center p-8 text-slate-400 max-w-sm">
+                    <div className="w-16 h-16 rounded-full bg-slate-900 border-2 border-buk-gold/50 flex items-center justify-center mx-auto mb-3 shadow-lg">
+                      <Camera className="w-8 h-8 text-buk-gold" />
+                    </div>
+                    <h4 className="text-sm font-bold text-white">Biometric Viewfinder Ready</h4>
+                    <p className="text-xs text-slate-300 mt-1">
+                      Click <strong className="text-buk-gold font-bold">Start Attendance Scanner</strong>. Students should face camera directly for instantaneous recognition.
                     </p>
+                    <div className="mt-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 text-[11px] font-bold text-white">
+                      <Sparkles className="w-3.5 h-3.5 text-buk-gold" />
+                      <span>{students.length} students enrolled in {selectedUnit}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* HUD STATUS OVERLAY BANNER */}
+                {isScanning && hudNotice && (
+                  <div className="absolute top-4 inset-x-4 pointer-events-none transition-all duration-300 animate-in fade-in slide-in-from-top-4">
+                    {hudNotice.type === 'success' && (
+                      <div className="p-4 rounded-2xl bg-emerald-600/95 text-white backdrop-blur-md shadow-2xl border-2 border-emerald-400 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                          <CheckCircle2 className="w-6 h-6 text-white" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-black tracking-wider text-white uppercase flex items-center gap-2">
+                            <span>{hudNotice.title}</span>
+                            <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                          </p>
+                          <p className="text-xs font-bold text-white mt-0.5 truncate">
+                            {hudNotice.subtitle}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {hudNotice.type === 'already' && (
+                      <div className="p-4 rounded-2xl bg-amber-600/95 text-white backdrop-blur-md shadow-2xl border-2 border-amber-400 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                          <AlertTriangle className="w-6 h-6 text-white" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-black tracking-wider text-white uppercase">
+                            {hudNotice.title}
+                          </p>
+                          <p className="text-xs font-bold text-white mt-0.5 truncate">
+                            {hudNotice.subtitle}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {hudNotice.type === 'unknown' && (
+                      <div className="p-4 rounded-2xl bg-rose-700/95 text-white backdrop-blur-md shadow-2xl border-2 border-rose-400 flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                          <XCircle className="w-6 h-6 text-white" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-black tracking-wider text-white uppercase">
+                            {hudNotice.title}
+                          </p>
+                          <p className="text-xs font-bold text-white mt-0.5">
+                            {hudNotice.subtitle}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Viewfinder Alignment Guide Ring */}
+                {isScanning && (
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div className="w-56 h-72 sm:w-64 sm:h-80 border-2 border-dashed border-buk-gold/60 rounded-[80px] shadow-[0_0_20px_rgba(202,138,4,0.2)] flex flex-col items-center justify-between p-4">
+                      <span className="text-[10px] font-bold text-white/90 bg-black/60 px-2 py-0.5 rounded-full backdrop-blur-sm">
+                        ALIGN FACE HERE
+                      </span>
+                      <span className="text-[10px] font-semibold text-white/80 bg-black/60 px-2 py-0.5 rounded-full backdrop-blur-sm">
+                        BUK BIOMETRIC AI
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* Control Buttons & Last Recognized notification */}
+              {/* Viewfinder Bottom Controls */}
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                {!isScanning ? (
-                  <button
-                    onClick={startScanning}
-                    disabled={!modelsReady}
-                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-buk-gold hover:bg-buk-gold-dark text-buk-navy transition-all shadow-md flex items-center gap-2"
-                  >
-                    <Play className="w-4 h-4" />
-                    <span>Start Attendance Scanner</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={stopScanning}
-                    className="px-5 py-2.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white transition-all shadow-md flex items-center gap-2"
-                  >
-                    <Square className="w-4 h-4" />
-                    <span>Pause Scanner</span>
-                  </button>
-                )}
+                <div className="flex items-center gap-2">
+                  {!isScanning ? (
+                    <button
+                      onClick={() => startScanning()}
+                      disabled={!modelsReady}
+                      className="px-5 py-2.5 rounded-xl text-xs font-bold bg-buk-gold hover:bg-buk-gold-dark text-buk-navy transition-all shadow-md flex items-center gap-2"
+                    >
+                      <Play className="w-4 h-4 fill-buk-navy" />
+                      <span>Start Attendance Scanner</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={stopScanning}
+                      className="px-5 py-2.5 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white transition-all shadow-md flex items-center gap-2"
+                    >
+                      <Square className="w-4 h-4 fill-white text-white" />
+                      <span className="text-white">Pause Scanner</span>
+                    </button>
+                  )}
 
-                {lastRecognized && (
-                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-50 border border-green-200 text-green-800 text-[11px] font-bold">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Recognized: {lastRecognized}</span>
-                  </div>
-                )}
+                  <span
+                    className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-mono font-bold ${
+                      isScanning ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${isScanning ? 'bg-emerald-600 animate-pulse' : 'bg-slate-400'}`} />
+                    <span>{isScanning ? 'AI RECOGNIZING' : 'STANDBY'}</span>
+                  </span>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Models: <strong className={modelsReady ? 'text-emerald-700 font-bold' : 'text-amber-700'}>{modelsReady ? 'Ready' : 'Loading...'}</strong>
+                  </p>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Right Column: Real-time Attendance Presence Table */}
-          <div className="lg:col-span-6 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
+          {/* Right Column: Attendance Status & Roster */}
+          <div className="lg:col-span-5 bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm flex flex-col justify-between">
             <div>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
                   <Users className="w-4 h-4 text-buk-navy" />
-                  <h3 className="text-sm font-bold text-slate-900">Enrolled Students Roster</h3>
+                  <h3 className="text-sm font-bold text-slate-900">Live Attendance Roster</h3>
                 </div>
-                <span className="text-[11px] text-slate-500 font-medium">
+                <span className="text-[11px] text-slate-500 font-bold">
                   {presentCount} Present &bull; {students.length - presentCount} Absent
                 </span>
               </div>
 
-              <div className="border border-slate-200 rounded-2xl overflow-hidden max-h-[460px] overflow-y-auto">
+              {/* Scrollable Student Presence Table */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden max-h-[440px] overflow-y-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-slate-50 sticky top-0 border-b border-slate-200">
-                    <tr className="text-slate-400 uppercase text-[10px]">
-                      <th className="py-2.5 px-3 font-semibold">Student Name</th>
-                      <th className="py-2.5 px-3 font-semibold">Reg Number</th>
+                    <tr className="text-slate-500 uppercase text-[10px]">
+                      <th className="py-2.5 px-3 font-semibold">Student</th>
                       <th className="py-2.5 px-3 font-semibold">Status</th>
-                      <th className="py-2.5 px-3 font-semibold">Time Marked</th>
+                      <th className="py-2.5 px-3 font-semibold">Time</th>
                       <th className="py-2.5 px-3 font-semibold text-right">Action</th>
                     </tr>
                   </thead>
@@ -548,24 +785,22 @@ function AttendanceScannerContent() {
                         <tr
                           key={s.id}
                           className={`hover:bg-slate-50 transition-colors ${
-                            isPresent ? 'bg-green-50/50' : ''
+                            isPresent ? 'bg-emerald-50/60' : ''
                           }`}
                         >
-                          <td className="py-3 px-3 font-semibold text-slate-800">
-                            {s.name}
-                          </td>
-                          <td className="py-3 px-3 font-mono text-[11px] font-bold text-buk-navy">
-                            {s.registrationNumber}
+                          <td className="py-3 px-3">
+                            <p className="font-semibold text-slate-800 leading-tight">{s.name}</p>
+                            <p className="font-mono text-[10px] font-bold text-buk-navy mt-0.5">{s.registrationNumber}</p>
                           </td>
                           <td className="py-3 px-3">
                             <span
-                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                                 isPresent
-                                  ? 'bg-green-100 text-green-800'
+                                  ? 'bg-emerald-100 text-emerald-800'
                                   : 'bg-slate-100 text-slate-600'
                               }`}
                             >
-                              {isPresent ? <CheckCircle2 className="w-3 h-3" /> : null}
+                              {isPresent ? <CheckCircle2 className="w-3 h-3 text-emerald-700" /> : null}
                               <span>{s.status}</span>
                             </span>
                           </td>
@@ -575,7 +810,7 @@ function AttendanceScannerContent() {
                           <td className="py-3 px-3 text-right">
                             <button
                               onClick={() => toggleStudentStatus(s.registrationNumber)}
-                              className="text-[10px] font-bold text-buk-navy hover:text-buk-gold-dark underline"
+                              className="text-[10px] font-bold text-buk-navy hover:text-buk-gold underline"
                             >
                               Toggle
                             </button>
@@ -589,7 +824,7 @@ function AttendanceScannerContent() {
             </div>
 
             <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-              <span>Manual overrides recorded immediately</span>
+              <span>Manual overrides saved immediately</span>
               <button
                 onClick={handleSaveAttendance}
                 disabled={savingAttendance}
@@ -598,6 +833,170 @@ function AttendanceScannerContent() {
                 <Save className="w-3.5 h-3.5" />
                 <span>Save Session</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FULL-SCREEN KIOSK OVERLAY FOR MOBILE & CLASSROOMS */}
+      {isKioskMode && (
+        <div className="fixed inset-0 z-50 bg-slate-950 flex flex-col text-white">
+          {/* Kiosk Top Bar */}
+          <div className="p-4 bg-buk-navy/95 border-b border-buk-gold/60 backdrop-blur-md flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
+              <div>
+                <h3 className="text-sm font-extrabold text-white tracking-wide">
+                  BUK-FRAS KIOSK SCANNER &bull; {selectedUnit}
+                </h3>
+                <p className="text-[11px] text-white/80">
+                  Venue: {selectedVenue} &bull; Ratio: {presentCount}/{students.length} ({attendancePercentage}%)
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Sound Toggle */}
+              <button
+                onClick={toggleSound}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all flex items-center gap-1.5"
+                title={soundEnabled ? 'Mute Audio Alerts' : 'Enable Audio Alerts'}
+              >
+                {soundEnabled ? <Volume2 className="w-5 h-5 text-emerald-400" /> : <VolumeX className="w-5 h-5 text-white/60" />}
+                <span className="text-xs font-bold text-white hidden sm:inline">{soundEnabled ? 'Sound ON' : 'Muted'}</span>
+              </button>
+
+              {/* Camera Switch */}
+              <button
+                onClick={handleToggleCamera}
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white transition-all flex items-center gap-1.5"
+                title="Switch Front / Rear Camera"
+              >
+                <FlipHorizontal className="w-5 h-5 text-white" />
+                <span className="text-xs font-bold text-white hidden sm:inline">{facingMode === 'user' ? 'Front' : 'Rear'}</span>
+              </button>
+
+              {/* Commit & Save */}
+              <button
+                onClick={handleSaveAttendance}
+                disabled={savingAttendance}
+                className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5"
+              >
+                {savingAttendance ? <Loader2 className="w-4 h-4 animate-spin text-white" /> : <Save className="w-4 h-4 text-white" />}
+                <span className="text-white hidden sm:inline">Save</span>
+              </button>
+
+              {/* Exit Kiosk Mode */}
+              <button
+                onClick={() => setIsKioskMode(false)}
+                className="p-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-all flex items-center gap-1"
+                title="Exit Full-Screen Kiosk Mode"
+              >
+                <Minimize2 className="w-5 h-5 text-white" />
+                <span className="text-xs font-bold text-white hidden sm:inline">Exit Kiosk</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Kiosk Full-Bleed Video & Canvas */}
+          <div className="flex-1 relative overflow-hidden bg-black flex items-center justify-center">
+            <video
+              ref={videoRef}
+              autoPlay
+              muted
+              playsInline
+              className="w-full h-full object-cover"
+            />
+            <canvas
+              ref={canvasRef}
+              className="absolute inset-0 pointer-events-none w-full h-full"
+            />
+
+            {/* KIOSK HUD FEEDBACK BANNER */}
+            {hudNotice && (
+              <div className="absolute top-6 inset-x-6 sm:inset-x-24 z-20 pointer-events-none transition-all duration-300 animate-in fade-in slide-in-from-top-6">
+                {hudNotice.type === 'success' && (
+                  <div className="p-5 rounded-3xl bg-emerald-600/95 text-white backdrop-blur-xl shadow-2xl border-4 border-emerald-400 flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                      <CheckCircle2 className="w-9 h-9 text-white" />
+                    </div>
+                    <div>
+                      <h4 className="text-base sm:text-lg font-black tracking-wider text-white uppercase flex items-center gap-2">
+                        <span>{hudNotice.title}</span>
+                        <span className="w-3 h-3 rounded-full bg-white animate-ping" />
+                      </h4>
+                      <p className="text-sm sm:text-base font-bold text-white mt-1">
+                        {hudNotice.subtitle}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {hudNotice.type === 'already' && (
+                  <div className="p-5 rounded-3xl bg-amber-600/95 text-white backdrop-blur-xl shadow-2xl border-4 border-amber-400 flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                      <AlertTriangle className="w-9 h-9 text-white" />
+                    </div>
+                    <div>
+                      <h4 className="text-base sm:text-lg font-black tracking-wider text-white uppercase">
+                        {hudNotice.title}
+                      </h4>
+                      <p className="text-sm sm:text-base font-bold text-white mt-1">
+                        {hudNotice.subtitle}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {hudNotice.type === 'unknown' && (
+                  <div className="p-5 rounded-3xl bg-rose-700/95 text-white backdrop-blur-xl shadow-2xl border-4 border-rose-400 flex items-center gap-4">
+                    <div className="w-14 h-14 rounded-2xl bg-white/20 flex items-center justify-center shrink-0">
+                      <XCircle className="w-9 h-9 text-white" />
+                    </div>
+                    <div>
+                      <h4 className="text-base sm:text-lg font-black tracking-wider text-white uppercase">
+                        {hudNotice.title}
+                      </h4>
+                      <p className="text-sm sm:text-base font-bold text-white mt-1">
+                        {hudNotice.subtitle}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Target Alignment Oval */}
+            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+              <div className="w-72 h-96 sm:w-80 sm:h-[440px] border-4 border-dashed border-buk-gold/70 rounded-[120px] shadow-[0_0_40px_rgba(202,138,4,0.3)] flex flex-col items-center justify-between p-6">
+                <span className="text-xs font-black text-white bg-black/70 px-3 py-1 rounded-full backdrop-blur-md border border-white/20">
+                  CENTER FACE WITHIN OVAL
+                </span>
+                <span className="text-xs font-bold text-white bg-black/70 px-3 py-1 rounded-full backdrop-blur-md border border-white/20">
+                  BAYERO UNIVERSITY KANO
+                </span>
+              </div>
+            </div>
+
+            {/* Live Bottom Ticker in Kiosk */}
+            <div className="absolute bottom-4 inset-x-4 bg-slate-900/90 backdrop-blur-md rounded-2xl p-3 border border-white/10 flex items-center justify-between text-xs text-white">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-buk-gold" />
+                <span className="font-bold text-white">
+                  Present: {presentCount} / {students.length} ({attendancePercentage}%)
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={isScanning ? stopScanning : () => startScanning()}
+                  className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 ${
+                    isScanning ? 'bg-rose-600 text-white' : 'bg-buk-gold text-buk-navy'
+                  }`}
+                >
+                  {isScanning ? <Square className="w-3.5 h-3.5 fill-white text-white" /> : <Play className="w-3.5 h-3.5 fill-buk-navy" />}
+                  <span>{isScanning ? 'Pause' : 'Resume'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

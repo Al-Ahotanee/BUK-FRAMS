@@ -13,7 +13,8 @@ import {
   ArrowUpRight, 
   Clock, 
   CheckCircle2, 
-  RefreshCw
+  RefreshCw,
+  BarChart3,
 } from 'lucide-react';
 
 interface StatsData {
@@ -67,7 +68,14 @@ export default function AdminDashboardPage() {
             </p>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-2.5">
+            <Link
+              href="/admin/analytics"
+              className="bg-white/10 hover:bg-white/20 text-white border border-white/20 text-xs font-bold px-3.5 py-2.5 rounded-xl transition-all shadow-sm flex items-center gap-2"
+            >
+              <BarChart3 className="w-4 h-4 text-white" />
+              <span className="text-white">Reports & Analytics</span>
+            </Link>
             <Link
               href="/admin/students/enroll"
               className="bg-buk-gold hover:bg-buk-gold-dark text-buk-navy text-xs font-bold px-4 py-2.5 rounded-xl transition-all shadow-md flex items-center gap-2"

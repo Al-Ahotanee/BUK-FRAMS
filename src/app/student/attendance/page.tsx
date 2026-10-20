@@ -12,6 +12,8 @@ import {
   CheckCircle2,
   FileQuestion,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 
 interface AttendanceLog {
@@ -37,6 +39,10 @@ function AttendanceLedgerContent() {
   const [unitFilter, setUnitFilter] = useState(initialUnit);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
 
   useEffect(() => {
     fetch('/api/student/attendance')
@@ -72,6 +78,18 @@ function AttendanceLedgerContent() {
       return matchesUnit && matchesStatus && matchesSearch;
     });
   }, [logs, unitFilter, statusFilter, searchQuery]);
+
+  // Reset page when filter changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [unitFilter, statusFilter, searchQuery, pageSize]);
+
+  const totalRecords = filteredLogs.length;
+  const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+  const paginatedLogs = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredLogs.slice(start, start + pageSize);
+  }, [filteredLogs, currentPage, pageSize]);
 
   if (loading) {
     return (
@@ -168,7 +186,7 @@ function AttendanceLedgerContent() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredLogs.map((log) => (
+                {paginatedLogs.map((log) => (
                   <tr key={log.id} className="hover:bg-slate-50/50 transition-colors">
                     <td className="py-3.5 px-5">
                       <div className="font-bold text-slate-900 font-mono">{log.unitCode}</div>
@@ -217,6 +235,54 @@ function AttendanceLedgerContent() {
                 ))}
               </tbody>
             </table>
+
+            {/* Pagination Navigation Footer */}
+            <div className="p-3.5 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-600">
+              <div className="flex items-center gap-3">
+                <span>
+                  Showing <strong className="text-slate-900 font-bold">{Math.min(totalRecords, (currentPage - 1) * pageSize + 1)}</strong> to{' '}
+                  <strong className="text-slate-900 font-bold">{Math.min(totalRecords, currentPage * pageSize)}</strong> of{' '}
+                  <strong className="text-slate-900 font-bold">{totalRecords}</strong> records
+                </span>
+
+                <div className="flex items-center gap-1.5 pl-3 border-l border-slate-200">
+                  <span className="text-[11px] text-slate-500">Rows:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-semibold focus:outline-none"
+                  >
+                    <option value={15}>15</option>
+                    <option value={30}>30</option>
+                    <option value={50}>50</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Previous Page"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <span className="px-3 py-1 font-bold text-slate-800 text-xs">
+                  Page {currentPage} of {totalPages}
+                </span>
+
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="Next Page"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
